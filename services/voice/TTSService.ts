@@ -36,6 +36,7 @@ class TTSServiceImpl {
   }
 
   async speak(text: string, options?: TTSOptions): Promise<void> {
+    console.log('[AIDBG] TTSService.speak called. text len =', text ? text.length : 0);
     if (!text || text.trim().length === 0) {
       return;
     }

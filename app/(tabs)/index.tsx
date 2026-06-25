@@ -8,29 +8,45 @@ import {
   TouchableOpacity,
   Animated,
   Easing,
+  ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Menu, Settings, Mic, Sparkles } from 'lucide-react-native';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 import { SpeechState } from '@/services/speech/types';
+import { useConversation, AssistantState } from '@/hooks/useConversation';
+import { MessageBubble } from '@/components/MessageBubble';
 
 /**
- * PLACEHOLDER HOME (Option A) — pink/blue glassmorphism design, now wired to
- * the real speech pipeline (useSpeechRecognition -> SpeechService).
- *
- * Self-contained UI deps only (react-native + expo-linear-gradient + expo-blur +
- * lucide). The only logic dependency is the restored useSpeechRecognition hook.
- * Replace with the full real HomeScreen in Phase 6.
+ * PLACEHOLDER HOME (Option A) — pink/blue glassmorphism design, now wired to the
+ * FULL pipeline: useSpeechRecognition (STT) -> hand-off -> useConversation
+ * (intent -> AIService/Gemini -> TTS). UI design preserved; the orb is the idle
+ * hero and message bubbles appear once a conversation starts.
  */
 
-function statusLabel(state: SpeechState, isSupported: boolean): string {
+type Phase = 'idle' | 'listening' | 'processing' | 'thinking' | 'speaking' | 'error';
+
+function computePhase(s: SpeechState, a: AssistantState): Phase {
+  if (s === 'error') return 'error';
+  if (a === 'thinking') return 'thinking';
+  if (a === 'speaking') return 'speaking';
+  if (s === 'listening') return 'listening';
+  if (s === 'processing') return 'processing';
+  return 'idle';
+}
+
+function phaseLabel(p: Phase, isSupported: boolean): string {
   if (!isSupported) return 'Unavailable';
-  switch (state) {
+  switch (p) {
     case 'listening':
       return 'Listening…';
     case 'processing':
       return 'Processing…';
+    case 'thinking':
+      return 'Thinking…';
+    case 'speaking':
+      return 'Speaking…';
     case 'error':
       return 'Error';
     default:
@@ -38,12 +54,15 @@ function statusLabel(state: SpeechState, isSupported: boolean): string {
   }
 }
 
-function statusDotColor(state: SpeechState): string {
-  switch (state) {
+function phaseColor(p: Phase): string {
+  switch (p) {
     case 'listening':
       return '#34D399';
+    case 'thinking':
     case 'processing':
       return '#C084FC';
+    case 'speaking':
+      return '#67E8F9';
     case 'error':
       return '#FB7185';
     default:
@@ -53,31 +72,45 @@ function statusDotColor(state: SpeechState): string {
 
 export default function HomeScreen() {
   const {
-    state,
+    state: speechState,
     transcript,
     interimTranscript,
-    error,
+    intentResult,
+    error: speechError,
     isSupported,
     isListening,
     startListening,
     stopListening,
   } = useSpeechRecognition();
 
-  // Gentle "energy" pulse for the orb — RN Animated only (no extra deps).
-  const pulse = useRef(new Animated.Value(0)).current;
+  const {
+    state: assistantState,
+    messages,
+    error: conversationError,
+    processInput,
+  } = useConversation();
 
+  const phase = computePhase(speechState, assistantState);
+  const error = speechError || conversationError;
+  const active = isListening || assistantState === 'thinking' || assistantState === 'speaking';
+
+  const scrollRef = useRef<ScrollView>(null);
+  const prevTranscriptRef = useRef('');
+
+  // Gentle "energy" pulse for the orb — RN Animated only (faster while active).
+  const pulse = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, {
           toValue: 1,
-          duration: isListening ? 1100 : 2600,
+          duration: active ? 1100 : 2600,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
         Animated.timing(pulse, {
           toValue: 0,
-          duration: isListening ? 1100 : 2600,
+          duration: active ? 1100 : 2600,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
@@ -85,11 +118,32 @@ export default function HomeScreen() {
     );
     loop.start();
     return () => loop.stop();
-  }, [pulse, isListening]);
+  }, [pulse, active]);
 
-  const orbScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, isListening ? 1.12 : 1.06] });
-  const glowOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, isListening ? 0.95 : 0.8] });
-  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, isListening ? 1.28 : 1.18] });
+  const orbScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, active ? 1.12 : 1.06] });
+  const glowOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, active ? 0.95 : 0.8] });
+  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, active ? 1.28 : 1.18] });
+
+  // HAND-OFF: when a final transcript exists and both machines are idle, process it once.
+  useEffect(() => {
+    if (
+      transcript &&
+      transcript.trim().length > 0 &&
+      speechState === 'idle' &&
+      assistantState === 'idle' &&
+      prevTranscriptRef.current !== transcript
+    ) {
+      prevTranscriptRef.current = transcript;
+      processInput(transcript, intentResult);
+    }
+  }, [transcript, speechState, assistantState, intentResult, processInput]);
+
+  // Auto-scroll to newest message.
+  useEffect(() => {
+    if (messages.length > 0) {
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+    }
+  }, [messages]);
 
   useEffect(() => {
     console.log('[MICDBG] HomeScreen mounted. isSupported =', isSupported);
@@ -144,28 +198,43 @@ export default function HomeScreen() {
         {/* Status pill */}
         <View style={styles.statusWrap}>
           <BlurView intensity={30} tint="light" style={styles.statusPill}>
-            <View style={[styles.statusDot, { backgroundColor: statusDotColor(state) }]} />
-            <Text style={styles.statusText}>{statusLabel(state, isSupported)}</Text>
+            <View style={[styles.statusDot, { backgroundColor: phaseColor(phase) }]} />
+            <Text style={styles.statusText}>{phaseLabel(phase, isSupported)}</Text>
           </BlurView>
         </View>
 
-        {/* Central energy orb */}
+        {/* Central area: conversation when active, orb when idle */}
         <View style={styles.orbArea}>
-          <Animated.View
-            style={[styles.ring, { transform: [{ scale: ringScale }], opacity: glowOpacity }]}
-          />
-          <Animated.View style={[styles.glow, { opacity: glowOpacity }]} />
-          <Animated.View style={[styles.orb, { transform: [{ scale: orbScale }] }]}>
-            <LinearGradient
-              colors={['#8FD3FF', '#A88BFF', '#FF9EC4']}
-              start={{ x: 0.1, y: 0.1 }}
-              end={{ x: 0.9, y: 0.9 }}
-              style={styles.orbFill}
+          {messages.length > 0 ? (
+            <ScrollView
+              ref={scrollRef}
+              style={styles.messages}
+              contentContainerStyle={styles.messagesContent}
+              showsVerticalScrollIndicator={false}
             >
-              <View style={styles.orbHighlight} />
-              <Sparkles size={34} color="rgba(255,255,255,0.9)" strokeWidth={1.6} />
-            </LinearGradient>
-          </Animated.View>
+              {messages.map((m) => (
+                <MessageBubble key={m.id} message={m} />
+              ))}
+            </ScrollView>
+          ) : (
+            <>
+              <Animated.View
+                style={[styles.ring, { transform: [{ scale: ringScale }], opacity: glowOpacity }]}
+              />
+              <Animated.View style={[styles.glow, { opacity: glowOpacity }]} />
+              <Animated.View style={[styles.orb, { transform: [{ scale: orbScale }] }]}>
+                <LinearGradient
+                  colors={['#8FD3FF', '#A88BFF', '#FF9EC4']}
+                  start={{ x: 0.1, y: 0.1 }}
+                  end={{ x: 0.9, y: 0.9 }}
+                  style={styles.orbFill}
+                >
+                  <View style={styles.orbHighlight} />
+                  <Sparkles size={34} color="rgba(255,255,255,0.9)" strokeWidth={1.6} />
+                </LinearGradient>
+              </Animated.View>
+            </>
+          )}
         </View>
 
         {/* Live transcript / interim / error (single slot — design preserved) */}
@@ -177,7 +246,7 @@ export default function HomeScreen() {
           </Text>
         )}
 
-        {/* Bottom mic area — now wired to startListening / stopListening */}
+        {/* Bottom mic area — wired to startListening / stopListening */}
         <View style={styles.micArea}>
           <BlurView intensity={50} tint="light" style={styles.micCard}>
             <TouchableOpacity
@@ -257,6 +326,8 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 13, color: '#5C5680', fontFamily: 'Inter_600SemiBold', letterSpacing: 0.4 },
 
   orbArea: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  messages: { alignSelf: 'stretch', flex: 1 },
+  messagesContent: { paddingVertical: 12, gap: 2 },
   ring: {
     position: 'absolute',
     width: 300,

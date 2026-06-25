@@ -145,12 +145,7 @@ export default function HomeScreen() {
     }
   }, [messages]);
 
-  useEffect(() => {
-    console.log('[MICDBG] HomeScreen mounted. isSupported =', isSupported);
-  }, [isSupported]);
-
   const handleMic = () => {
-    console.log('[MICDBG] handleMic fired. isListening =', isListening);
     if (isListening) {
       stopListening();
     } else {
@@ -252,10 +247,7 @@ export default function HomeScreen() {
             <TouchableOpacity
               activeOpacity={0.85}
               style={styles.micBtnWrap}
-              onPress={() => {
-                console.log('[MICDBG] mic button pressed');
-                handleMic();
-              }}
+              onPress={handleMic}
             >
               <LinearGradient
                 colors={isListening ? ['#FF9EC4', '#A88BFF'] : ['#A88BFF', '#7CB8FF']}

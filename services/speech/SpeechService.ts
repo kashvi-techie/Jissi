@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { Platform, NativeModules } from 'react-native';
 import Voice, {
   SpeechResultsEvent,
   SpeechErrorEvent,
@@ -39,7 +39,11 @@ declare global {
 let voiceAvailable = false;
 
 try {
-  if (Platform.OS !== 'web' && Voice) {
+  // The default `Voice` export is a JS wrapper that exists even in Expo Go, but
+  // the actual native module (NativeModules.Voice) is null there. Checking the
+  // native module avoids "cannot read property 'startSpeech' of null" crashes and
+  // makes isSupported() correctly return false when there's no native build.
+  if (Platform.OS !== 'web' && NativeModules.Voice) {
     voiceAvailable = true;
   }
 } catch {
@@ -172,7 +176,6 @@ class SpeechServiceImpl {
   }
 
   async startListening(locale: string = 'en-US'): Promise<void> {
-    console.log('[MICDBG] SpeechService.startListening. platform =', Platform.OS, 'isInitialized =', this.isInitialized, 'nativeAvailable =', this.nativeAvailable);
     if (!this.isInitialized) {
       throw new Error('SpeechService not initialized. Call initialize() first.');
     }

@@ -70,13 +70,18 @@ export function useConversation(): UseConversationResult {
         conversation = await ConversationRepository.createConversation();
       }
       setCurrentConversation(conversation);
-      setMessages(conversation.messages);
+      // Copy the array — ConversationRepository mutates conversation.messages in
+      // place (push), and sharing that reference with React state caused messages
+      // to be appended twice (duplicate React keys).
+      setMessages([...conversation.messages]);
 
       const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+      console.log('[AIDBG] useConversation init. GEMINI key present =', !!apiKey, 'len =', apiKey ? apiKey.length : 0);
       if (apiKey) {
+        console.log('[AIDBG] AIService.initialize() called');
         AIService.initialize({ apiKey });
       } else {
-        console.warn('Gemini API key not found. AI features will be limited.');
+        console.warn('[AIDBG] Gemini API key NOT found. AI disabled.');
       }
     };
 
@@ -84,6 +89,7 @@ export function useConversation(): UseConversationResult {
   }, []);
 
   const processInput = useCallback(async (input: string, intent?: IntentResult | null): Promise<void> => {
+    console.log('[AIDBG] processInput called. input =', JSON.stringify(input), 'intent =', intent?.intent);
     if (!input || input.trim().length === 0) return;
 
     setError(null);
@@ -129,7 +135,9 @@ export function useConversation(): UseConversationResult {
       return;
     }
 
+    console.log('[AIDBG] AI branch reached. AIService.isInitialized =', AIService.isInitialized());
     if (!AIService.isInitialized()) {
+      console.log('[AIDBG] STOP: AIService not initialized (missing GEMINI key?)');
       setError('AI service is not available. Please check your configuration.');
       setState('idle');
       return;
@@ -138,7 +146,9 @@ export function useConversation(): UseConversationResult {
     setState('thinking');
 
     try {
+      console.log('[AIDBG] calling AIService.generate()');
       const result: AIGenerationResult = await AIService.generate(input);
+      console.log('[AIDBG] AIService.generate() returned. text len =', result.text ? result.text.length : 0);
 
       const assistantMessage = await ConversationRepository.addMessage({
         conversationId: currentConversation?.id || '',

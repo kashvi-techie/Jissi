@@ -68,9 +68,11 @@ class AIServiceImpl {
     this.addMessage('user', prompt);
 
     try {
+      console.log('[AIDBG] AIService.generate -> sending to Gemini...');
       const result = await this.chat.sendMessage(prompt);
       const response = result.response;
       const text = response.text();
+      console.log('[AIDBG] Gemini responded. text len =', text ? text.length : 0);
 
       this.addMessage('assistant', text);
 
@@ -85,6 +87,7 @@ class AIServiceImpl {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.log('[AIDBG] Gemini call FAILED:', errorMessage);
       this.addMessage('assistant', `I apologize, but I encountered an error: ${errorMessage}`);
 
       return {

@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Platform } from 'react-native';
 import { AIService, AIMessage, AIGenerationResult } from '@/services/ai';
 import { ConversationRepository, Conversation } from '@/services/conversation';
 import { TTSService, TTSState } from '@/services/voice';
 import { ActionService, ActionResult } from '@/services/actions';
 import { IntentResult, IntentType } from '@/engine/intentEngine';
 
+/** High-level assistant phase surfaced to the UI. */
 export type AssistantState = 'idle' | 'listening' | 'thinking' | 'speaking';
 
-interface UseConversationResult {
+/** Public shape returned by {@link useConversation}. */
+export interface UseConversationResult {
   state: AssistantState;
   currentConversation: Conversation | null;
   messages: AIMessage[];
@@ -23,6 +24,7 @@ interface UseConversationResult {
   clearConversation: () => void;
 }
 
+/** Intents that map to a device action rather than an AI answer. */
 const ACTION_INTENTS: IntentType[] = [
   'open_youtube',
   'open_chrome',
@@ -34,6 +36,21 @@ function isActionIntent(intent: IntentType): boolean {
   return ACTION_INTENTS.includes(intent);
 }
 
+/**
+ * Conversation orchestrator hook.
+ *
+ * This is the "brain stem" of JISSI: it takes a recognized utterance and routes
+ * it to either a device action (ActionService) or the AI (AIService/Gemini),
+ * persists the exchange (ConversationRepository), and speaks the reply
+ * (TTSService). The UI only consumes the resulting state.
+ *
+ * Decoupling notes:
+ * - React state is the single source of truth for *rendering*; the repository is
+ *   the durable source of truth on disk.
+ * - On load we COPY + de-dupe `conversation.messages` so the repository's
+ *   in-place mutations never leak into React state (which previously caused
+ *   duplicate React keys).
+ */
 export function useConversation(): UseConversationResult {
   const [state, setState] = useState<AssistantState>('idle');
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
@@ -45,11 +62,13 @@ export function useConversation(): UseConversationResult {
 
   const isInitializedRef = useRef(false);
 
+  // Bridge the external TTSService state machine into React.
   useEffect(() => {
     const unsubscribe = TTSService.subscribeToState(setTTSState);
     return () => unsubscribe();
   }, []);
 
+  // Keep the public phase in sync with TTS playback.
   useEffect(() => {
     if (ttsState === 'speaking') {
       setState('speaking');
@@ -58,6 +77,7 @@ export function useConversation(): UseConversationResult {
     }
   }, [ttsState, state]);
 
+  // One-time bootstrap: load/create the conversation and initialize the AI.
   useEffect(() => {
     const init = async () => {
       if (isInitializedRef.current) return;
@@ -70,109 +90,113 @@ export function useConversation(): UseConversationResult {
         conversation = await ConversationRepository.createConversation();
       }
       setCurrentConversation(conversation);
-      // Copy the array — ConversationRepository mutates conversation.messages in
-      // place (push), and sharing that reference with React state caused messages
-      // to be appended twice (duplicate React keys).
-      setMessages([...conversation.messages]);
+
+      // De-dupe by id on load: the repository mutates `conversation.messages` in
+      // place, and older sessions may have persisted duplicates. Copying here
+      // decouples React state from that array and prevents duplicate React keys.
+      const seenIds = new Set<string>();
+      const uniqueMessages = conversation.messages.filter((m) => {
+        if (seenIds.has(m.id)) return false;
+        seenIds.add(m.id);
+        return true;
+      });
+      setMessages(uniqueMessages);
 
       const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-      console.log('[AIDBG] useConversation init. GEMINI key present =', !!apiKey, 'len =', apiKey ? apiKey.length : 0);
       if (apiKey) {
-        console.log('[AIDBG] AIService.initialize() called');
         AIService.initialize({ apiKey });
       } else {
-        console.warn('[AIDBG] Gemini API key NOT found. AI disabled.');
+        console.warn('Gemini API key not found. AI features will be disabled.');
       }
     };
 
     init();
   }, []);
 
-  const processInput = useCallback(async (input: string, intent?: IntentResult | null): Promise<void> => {
-    console.log('[AIDBG] processInput called. input =', JSON.stringify(input), 'intent =', intent?.intent);
-    if (!input || input.trim().length === 0) return;
+  /**
+   * Core pipeline: persist the user message, then either execute a device
+   * action or generate an AI reply, then speak the result.
+   */
+  const processInput = useCallback(
+    async (input: string, intent?: IntentResult | null): Promise<void> => {
+      if (!input || input.trim().length === 0) return;
 
-    setError(null);
-    setLastResponse(null);
-    setLastActionResult(null);
+      setError(null);
+      setLastResponse(null);
+      setLastActionResult(null);
 
-    const userMessage = await ConversationRepository.addMessage({
-      conversationId: currentConversation?.id || '',
-      role: 'user',
-      content: input,
-    });
-    setMessages(prev => [...prev, userMessage]);
+      const userMessage = await ConversationRepository.addMessage({
+        conversationId: currentConversation?.id || '',
+        role: 'user',
+        content: input,
+      });
+      // Functional update + the load-time copy guarantee no duplication here.
+      setMessages((prev) => [...prev, userMessage]);
 
-    if (intent && intent.intent !== 'unknown' && isActionIntent(intent.intent)) {
+      // ── Branch 1: device action ──────────────────────────────────────────
+      if (intent && intent.intent !== 'unknown' && isActionIntent(intent.intent)) {
+        setState('thinking');
+        try {
+          const result = await ActionService.executeFromIntent(intent.intent, intent.query);
+          setLastActionResult(result);
+
+          const replyText =
+            result.status === 'success'
+              ? result.message
+              : `I couldn't complete that action. ${result.error || result.message}`;
+
+          const assistantMessage = await ConversationRepository.addMessage({
+            conversationId: currentConversation?.id || '',
+            role: 'assistant',
+            content: replyText,
+          });
+          setMessages((prev) => [...prev, assistantMessage]);
+          if (result.status === 'success') setLastResponse(replyText);
+          await TTSService.speak(replyText);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Action failed');
+        } finally {
+          setState('idle');
+        }
+        return;
+      }
+
+      // ── Branch 2: AI answer ──────────────────────────────────────────────
+      if (!AIService.isInitialized()) {
+        setError('AI service is not available. Please check your configuration.');
+        setState('idle');
+        return;
+      }
+
       setState('thinking');
       try {
-        const result = await ActionService.executeFromIntent(intent.intent, intent.query);
-        setLastActionResult(result);
+        const result: AIGenerationResult = await AIService.generate(input);
 
-        if (result.status === 'success') {
-          const assistantMessage = await ConversationRepository.addMessage({
-            conversationId: currentConversation?.id || '',
-            role: 'assistant',
-            content: result.message,
-          });
-          setMessages(prev => [...prev, assistantMessage]);
-          setLastResponse(result.message);
-          await TTSService.speak(result.message);
-        } else {
-          const assistantMessage = await ConversationRepository.addMessage({
-            conversationId: currentConversation?.id || '',
-            role: 'assistant',
-            content: `I couldn't complete that action. ${result.error || result.message}`,
-          });
-          setMessages(prev => [...prev, assistantMessage]);
-          await TTSService.speak(`I couldn't complete that action. ${result.error || result.message}`);
-        }
+        const assistantMessage = await ConversationRepository.addMessage({
+          conversationId: currentConversation?.id || '',
+          role: 'assistant',
+          content: result.text,
+        });
+        setMessages((prev) => [...prev, assistantMessage]);
+        setLastResponse(result.text);
+
+        await TTSService.speak(result.text);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Action failed');
+        const message = err instanceof Error ? err.message : 'Failed to process your request';
+        setError(message);
+
+        const assistantMessage = await ConversationRepository.addMessage({
+          conversationId: currentConversation?.id || '',
+          role: 'assistant',
+          content: `I apologize, but I encountered an error. ${message}`,
+        });
+        setMessages((prev) => [...prev, assistantMessage]);
       } finally {
         setState('idle');
       }
-      return;
-    }
-
-    console.log('[AIDBG] AI branch reached. AIService.isInitialized =', AIService.isInitialized());
-    if (!AIService.isInitialized()) {
-      console.log('[AIDBG] STOP: AIService not initialized (missing GEMINI key?)');
-      setError('AI service is not available. Please check your configuration.');
-      setState('idle');
-      return;
-    }
-
-    setState('thinking');
-
-    try {
-      console.log('[AIDBG] calling AIService.generate()');
-      const result: AIGenerationResult = await AIService.generate(input);
-      console.log('[AIDBG] AIService.generate() returned. text len =', result.text ? result.text.length : 0);
-
-      const assistantMessage = await ConversationRepository.addMessage({
-        conversationId: currentConversation?.id || '',
-        role: 'assistant',
-        content: result.text,
-      });
-      setMessages(prev => [...prev, assistantMessage]);
-      setLastResponse(result.text);
-
-      await TTSService.speak(result.text);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to process your request';
-      setError(errorMessage);
-
-      const assistantMessage = await ConversationRepository.addMessage({
-        conversationId: currentConversation?.id || '',
-        role: 'assistant',
-        content: `I apologize, but I encountered an error. ${errorMessage}`,
-      });
-      setMessages(prev => [...prev, assistantMessage]);
-    } finally {
-      setState('idle');
-    }
-  }, [currentConversation]);
+    },
+    [currentConversation]
+  );
 
   const speak = useCallback(async (text: string): Promise<void> => {
     await TTSService.speak(text);

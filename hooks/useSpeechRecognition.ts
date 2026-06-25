@@ -5,13 +5,23 @@ import { SpeechService } from '@/services/speech/SpeechService';
 import { SpeechState } from '@/services/speech/types';
 import { detectIntent, IntentResult } from '@/engine/intentEngine';
 
-interface SpeechRecognitionResult {
+/**
+ * Public shape returned by {@link useSpeechRecognition}.
+ */
+export interface UseSpeechRecognitionResult {
+  /** Current speech-recognition state machine value. */
   state: SpeechState;
+  /** Final, committed transcript (accumulates across utterances). */
   transcript: string;
+  /** In-progress (not yet final) transcript shown live while speaking. */
   interimTranscript: string;
+  /** Intent detected from the latest final transcript. */
   intentResult: IntentResult | null;
+  /** Human-readable error, or null. */
   error: string | null;
+  /** Whether speech recognition is available on this platform/runtime. */
   isSupported: boolean;
+  /** Whether the microphone is actively listening. */
   isListening: boolean;
   startListening: () => Promise<void>;
   stopListening: () => Promise<void>;
@@ -20,25 +30,43 @@ interface SpeechRecognitionResult {
   hasMicrophonePermission: boolean;
 }
 
-export function useSpeechRecognition(): SpeechRecognitionResult {
+/**
+ * Speech-to-text hook.
+ *
+ * Owns the microphone lifecycle and exposes the live transcript plus the intent
+ * detected from it. All platform differences (native `@react-native-voice/voice`
+ * vs the browser Web Speech API) are encapsulated inside {@link SpeechService},
+ * so this hook stays platform-agnostic.
+ *
+ * State is intentionally local to the consuming screen — there is no shared
+ * mutable state here, which keeps the hook decoupled and easy to reason about.
+ */
+export function useSpeechRecognition(): UseSpeechRecognitionResult {
   const [state, setState] = useState<SpeechState>('idle');
   const [transcript, setTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
   const [intentResult, setIntentResult] = useState<IntentResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hasMicrophonePermission, setHasMicrophonePermission] = useState(false);
-  const [isListeningInternal, setIsListeningInternal] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+
+  // Guards the one-time SpeechService initialization (survives React re-renders
+  // and StrictMode double-invocation without re-initializing).
   const isInitializedRef = useRef(false);
 
   const isSupported = SpeechService.isSupported();
 
+  /**
+   * Requests microphone permission for the current platform.
+   * - Web: uses `getUserMedia` (triggers the browser prompt).
+   * - Native: uses `expo-av`'s permission API, with a settings deep-link fallback.
+   */
   const requestMicrophonePermission = useCallback(async (): Promise<boolean> => {
-    console.log('[MICDBG] requestMicrophonePermission. Platform =', Platform.OS);
     if (Platform.OS === 'web') {
       try {
         if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          stream.getTracks().forEach(track => track.stop());
+          stream.getTracks().forEach((track) => track.stop());
           setHasMicrophonePermission(true);
           return true;
         }
@@ -51,46 +79,50 @@ export function useSpeechRecognition(): SpeechRecognitionResult {
 
     try {
       const { status } = await Audio.requestPermissionsAsync();
-
       if (status === 'granted') {
         setHasMicrophonePermission(true);
         return true;
-      } else {
-        setError('Microphone permission is required for voice recognition.');
-        Alert.alert(
-          'Microphone Permission Required',
-          'JISSI needs microphone access to recognize your voice commands.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Open Settings', onPress: () => Linking.openSettings() },
-          ]
-        );
-        return false;
       }
+
+      setError('Microphone permission is required for voice recognition.');
+      Alert.alert(
+        'Microphone Permission Required',
+        'JISSI needs microphone access to recognize your voice commands.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]
+      );
+      return false;
     } catch {
       setError('Failed to request microphone permission.');
       return false;
     }
   }, []);
 
+  /**
+   * Registers SpeechService callbacks exactly once. Each callback maps a
+   * low-level speech event onto this hook's React state.
+   */
   const initializeSpeech = useCallback(async () => {
     if (isInitializedRef.current) return;
-    console.log('[MICDBG] initializeSpeech -> SpeechService.initialize()');
 
     await SpeechService.initialize({
       onSpeechStart: () => {
         setState('listening');
-        setIsListeningInternal(true);
+        setIsListening(true);
         setError(null);
       },
       onSpeechEnd: () => {
         setState('idle');
-        setIsListeningInternal(false);
+        setIsListening(false);
       },
       onSpeechResults: (results: string[]) => {
-        const finalTranscript = results[0] || '';
-        setTranscript(prev => {
-          const updated = prev ? prev + ' ' + finalTranscript : finalTranscript;
+        const finalChunk = results[0] || '';
+        // Accumulate the final transcript and recompute the intent from the
+        // full text. Functional update keeps this correct across re-renders.
+        setTranscript((prev) => {
+          const updated = prev ? `${prev} ${finalChunk}` : finalChunk;
           setIntentResult(detectIntent(updated));
           return updated;
         });
@@ -99,31 +131,32 @@ export function useSpeechRecognition(): SpeechRecognitionResult {
       onSpeechPartialResults: (partials: string[]) => {
         setInterimTranscript(partials[0] || '');
       },
-      onSpeechError: (errorMsg: string) => {
-        if (errorMsg.includes('no-speech') || errorMsg.includes('No speech')) {
+      onSpeechError: (message: string) => {
+        if (message.includes('no-speech') || message.includes('No speech')) {
           setError('No speech detected. Please try again.');
-        } else if (errorMsg.includes('not-allowed') || errorMsg.includes('permission')) {
+        } else if (message.includes('not-allowed') || message.includes('permission')) {
           setError('Microphone permission denied.');
         } else {
-          setError(`Speech recognition error: ${errorMsg}`);
+          setError(`Speech recognition error: ${message}`);
         }
         setState('error');
-        setIsListeningInternal(false);
+        setIsListening(false);
       },
     });
 
     isInitializedRef.current = true;
   }, []);
 
+  // Initialize on mount; tear down on unmount.
   useEffect(() => {
     initializeSpeech();
-
     return () => {
       SpeechService.destroy();
       isInitializedRef.current = false;
     };
   }, [initializeSpeech]);
 
+  // Reflect the platform's current permission status on mount.
   useEffect(() => {
     const checkInitialPermission = async () => {
       if (Platform.OS === 'web') {
@@ -141,26 +174,20 @@ export function useSpeechRecognition(): SpeechRecognitionResult {
   }, []);
 
   const startListening = useCallback(async () => {
-    console.log('[MICDBG] hook.startListening entry. isSupported =', isSupported);
     if (!isSupported) {
-      console.log('[MICDBG] STOP: isSupported is false');
       setError('Speech recognition is not supported on this device.');
       setState('error');
       return;
     }
 
-    const hasPermission = await requestMicrophonePermission();
-    console.log('[MICDBG] permission result =', hasPermission);
-    if (!hasPermission) return;
+    const granted = await requestMicrophonePermission();
+    if (!granted) return;
 
     try {
       setError(null);
       setInterimTranscript('');
-      console.log('[MICDBG] calling SpeechService.startListening');
       await SpeechService.startListening('en-US');
-      console.log('[MICDBG] SpeechService.startListening returned OK');
     } catch (err) {
-      console.log('[MICDBG] SpeechService.startListening threw:', err);
       setError(err instanceof Error ? err.message : 'Failed to start speech recognition.');
       setState('error');
     }
@@ -171,9 +198,9 @@ export function useSpeechRecognition(): SpeechRecognitionResult {
       await SpeechService.stopListening();
       setState('idle');
       setInterimTranscript('');
-      setIsListeningInternal(false);
+      setIsListening(false);
     } catch {
-      // Silent fail on stop
+      // Stopping should never throw fatally; ignore.
     }
   }, []);
 
@@ -192,7 +219,7 @@ export function useSpeechRecognition(): SpeechRecognitionResult {
     intentResult,
     error,
     isSupported,
-    isListening: isListeningInternal,
+    isListening,
     startListening,
     stopListening,
     clearTranscript,

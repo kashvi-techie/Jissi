@@ -1,0 +1,11 @@
+export { AIService } from './AIService';
+export {
+  AIMessage,
+  AIMessageRole,
+  AIConversation,
+  AIServiceConfig,
+  AIGenerationOptions,
+  AIGenerationResult,
+  DEFAULT_SYSTEM_PROMPT,
+  GEMINI_MODEL,
+} from './types';

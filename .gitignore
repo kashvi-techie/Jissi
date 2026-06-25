@@ -1,0 +1,46 @@
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native build artifacts
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+ios/build/
+ios/Pods/
+*.keystore
+!debug.keystore
+
+# Metro
+.metro-health-check*
+
+# logs
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.log
+
+# OS
+.DS_Store
+*.orig.*
+
+# secrets / env
+.env
+.env.*
+!.env.example
+
+# IDE / editors
+.idea/
+.vscode/
+
+# local backups / scratch
+*.bak
+
+# bolt scaffolding metadata
+.bolt/

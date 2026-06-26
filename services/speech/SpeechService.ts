@@ -180,19 +180,39 @@ class SpeechServiceImpl {
       throw new Error('SpeechService not initialized. Call initialize() first.');
     }
 
+    // Hard guard against duplicate starts. `isListening` is also flipped
+    // asynchronously by the onstart/onSpeechStart callbacks, so we set it
+    // synchronously here to close the race window where two rapid calls both pass
+    // the guard and call start() twice — which makes the Web SpeechRecognition
+    // throw "recognition has already started".
     if (this.isListening) {
       return;
     }
+    this.isListening = true;
 
     try {
       if (Platform.OS === 'web') {
-        this.webRecognition?.start();
+        try {
+          this.webRecognition?.start();
+        } catch (e) {
+          // Ignore the specific "already started" race; recognition is running.
+          const msg = e instanceof Error ? e.message : String(e);
+          if (!/already started/i.test(msg)) {
+            throw e;
+          }
+        }
       } else if (this.nativeAvailable && Voice) {
         await Voice.start(locale);
       } else {
-        throw new Error('Speech recognition not available on this device');
+        // Unsupported runtime (e.g. Expo Go without the native module): fail
+        // gracefully — never throw a runtime error.
+        this.isListening = false;
+        this.callbacks.onSpeechError?.('Speech recognition is not available on this device.');
+        return;
       }
     } catch (error) {
+      // Genuine failure: reset so the user can retry.
+      this.isListening = false;
       const message = error instanceof Error ? error.message : 'Failed to start listening';
       this.callbacks.onSpeechError?.(message);
       throw error;

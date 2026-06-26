@@ -134,6 +134,7 @@ export default function HomeScreen() {
       prevTranscriptRef.current !== transcript
     ) {
       prevTranscriptRef.current = transcript;
+      console.log('[FLOWDBG 4] hand-off -> processInput:', JSON.stringify(transcript));
       processInput(transcript, intentResult);
     }
   }, [transcript, speechState, assistantState, intentResult, processInput]);
@@ -146,6 +147,7 @@ export default function HomeScreen() {
   }, [messages]);
 
   const handleMic = () => {
+    if (!isSupported) return; // gracefully no-op on unsupported runtimes (e.g. Expo Go)
     if (isListening) {
       stopListening();
     } else {
@@ -246,8 +248,9 @@ export default function HomeScreen() {
           <BlurView intensity={50} tint="light" style={styles.micCard}>
             <TouchableOpacity
               activeOpacity={0.85}
-              style={styles.micBtnWrap}
+              style={[styles.micBtnWrap, { opacity: isSupported ? 1 : 0.4 }]}
               onPress={handleMic}
+              disabled={!isSupported}
             >
               <LinearGradient
                 colors={isListening ? ['#FF9EC4', '#A88BFF'] : ['#A88BFF', '#7CB8FF']}

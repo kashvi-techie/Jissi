@@ -68,9 +68,11 @@ class AIServiceImpl {
     this.addMessage('user', prompt);
 
     try {
+      console.log('[FLOWDBG 7] Gemini REQUEST. model=', this.config?.model || GEMINI_MODEL, 'promptLen=', prompt.length);
       const result = await this.chat.sendMessage(prompt);
       const response = result.response;
       const text = response.text();
+      console.log('[FLOWDBG 8] Gemini RESPONSE ok. textLen=', text ? text.length : 0);
 
       this.addMessage('assistant', text);
 
@@ -85,6 +87,7 @@ class AIServiceImpl {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.log('[FLOWDBG ERR] Gemini request FAILED (status/message):', errorMessage);
       this.addMessage('assistant', `I apologize, but I encountered an error: ${errorMessage}`);
 
       return {

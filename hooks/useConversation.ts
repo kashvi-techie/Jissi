@@ -103,10 +103,12 @@ export function useConversation(): UseConversationResult {
       setMessages(uniqueMessages);
 
       const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+      console.log('[FLOWDBG init] GEMINI key present =', !!apiKey, 'len =', apiKey ? apiKey.length : 0);
       if (apiKey) {
         AIService.initialize({ apiKey });
+        console.log('[FLOWDBG init] AIService.initialize done. isInitialized =', AIService.isInitialized());
       } else {
-        console.warn('Gemini API key not found. AI features will be disabled.');
+        console.warn('[FLOWDBG init] Gemini API key NOT found. AI disabled.');
       }
     };
 
@@ -119,6 +121,7 @@ export function useConversation(): UseConversationResult {
    */
   const processInput = useCallback(
     async (input: string, intent?: IntentResult | null): Promise<void> => {
+      console.log('[FLOWDBG 5] processInput entry. input=', JSON.stringify(input), 'intent=', intent?.intent);
       if (!input || input.trim().length === 0) return;
 
       setError(null);
@@ -162,7 +165,9 @@ export function useConversation(): UseConversationResult {
       }
 
       // ── Branch 2: AI answer ──────────────────────────────────────────────
+      console.log('[FLOWDBG 6] AI branch. AIService.isInitialized =', AIService.isInitialized());
       if (!AIService.isInitialized()) {
+        console.log('[FLOWDBG STOP] AIService NOT initialized — chain stops here (missing GEMINI key).');
         setError('AI service is not available. Please check your configuration.');
         setState('idle');
         return;
@@ -170,7 +175,9 @@ export function useConversation(): UseConversationResult {
 
       setState('thinking');
       try {
+        console.log('[FLOWDBG 6b] calling AIService.generate()');
         const result: AIGenerationResult = await AIService.generate(input);
+        console.log('[FLOWDBG 8b] generate returned. finishReason=', result.finishReason, 'textLen=', result.text ? result.text.length : 0);
 
         const assistantMessage = await ConversationRepository.addMessage({
           conversationId: currentConversation?.id || '',
@@ -179,6 +186,7 @@ export function useConversation(): UseConversationResult {
         });
         setMessages((prev) => [...prev, assistantMessage]);
         setLastResponse(result.text);
+        console.log('[FLOWDBG 9] assistant message created. id=', assistantMessage.id);
 
         await TTSService.speak(result.text);
       } catch (err) {

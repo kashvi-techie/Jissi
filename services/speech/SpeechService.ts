@@ -104,7 +104,11 @@ class SpeechServiceImpl {
     }
 
     this.webRecognition = new SpeechRecognitionClass();
-    this.webRecognition.continuous = true;
+    // Single-utterance per turn: with `continuous = true` Chrome keeps the
+    // recognizer alive and never fires `onend`, so speechState never returns to
+    // 'idle' and the continuous-mode hand-off (which requires idle) never runs.
+    // `false` makes the browser finalize on end-of-speech → onend → idle → hand-off.
+    this.webRecognition.continuous = false;
     this.webRecognition.interimResults = true;
     this.webRecognition.lang = 'en-US';
     this.webRecognition.maxAlternatives = 1;

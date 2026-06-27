@@ -13,16 +13,19 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Menu, Settings, Mic, Sparkles } from 'lucide-react-native';
-import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 import { SpeechState } from '@/services/speech/types';
-import { useConversation, AssistantState } from '@/hooks/useConversation';
+import { AssistantState } from '@/hooks/useConversation';
+import { useConversationMode } from '@/hooks/useConversationMode';
 import { MessageBubble } from '@/components/MessageBubble';
+import { Colors } from '@/constants/colors';
+import { Spacing, Radius, Duration, Elevation } from '@/constants/theme';
 
 /**
- * PLACEHOLDER HOME (Option A) — pink/blue glassmorphism design, now wired to the
- * FULL pipeline: useSpeechRecognition (STT) -> hand-off -> useConversation
- * (intent -> AIService/Gemini -> TTS). UI design preserved; the orb is the idle
- * hero and message bubbles appear once a conversation starts.
+ * HOME — "luxury AI OS" surface. A calm, dark, ambient-glass environment with a
+ * single luminous orb as the idle hero. Fully wired to the live pipeline:
+ * useSpeechRecognition (STT) -> hand-off -> useConversation (intent ->
+ * AIService/Gemini -> TTS). Only the visual layer changed in Phase 2.1; all
+ * state, hooks, and the hand-off contract are preserved.
  */
 
 type Phase = 'idle' | 'listening' | 'processing' | 'thinking' | 'speaking' | 'error';
@@ -40,13 +43,13 @@ function phaseLabel(p: Phase, isSupported: boolean): string {
   if (!isSupported) return 'Unavailable';
   switch (p) {
     case 'listening':
-      return 'Listening…';
+      return 'Listening';
     case 'processing':
-      return 'Processing…';
+      return 'Processing';
     case 'thinking':
-      return 'Thinking…';
+      return 'Thinking';
     case 'speaking':
-      return 'Speaking…';
+      return 'Speaking';
     case 'error':
       return 'Error';
     default:
@@ -57,60 +60,81 @@ function phaseLabel(p: Phase, isSupported: boolean): string {
 function phaseColor(p: Phase): string {
   switch (p) {
     case 'listening':
-      return '#34D399';
+      return Colors.status.listening;
     case 'thinking':
     case 'processing':
-      return '#C084FC';
+      return Colors.status.thinking;
     case 'speaking':
-      return '#67E8F9';
+      return Colors.status.speaking;
     case 'error':
-      return '#FB7185';
+      return Colors.status.error;
     default:
-      return '#A88BFF';
+      return Colors.status.idle;
   }
+}
+
+/** Subtle three-dot "thinking" shimmer (presentational only). */
+function ThinkingDots() {
+  const a = useRef(new Animated.Value(0.3)).current;
+  const b = useRef(new Animated.Value(0.3)).current;
+  const c = useRef(new Animated.Value(0.3)).current;
+  useEffect(() => {
+    const mk = (v: Animated.Value, delay: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(v, { toValue: 1, duration: 420, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+          Animated.timing(v, { toValue: 0.3, duration: 420, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        ])
+      );
+    const anims = [mk(a, 0), mk(b, 180), mk(c, 360)];
+    anims.forEach((x) => x.start());
+    return () => anims.forEach((x) => x.stop());
+  }, [a, b, c]);
+  return (
+    <View style={styles.thinkingRow}>
+      {[a, b, c].map((v, i) => (
+        <Animated.View key={i} style={[styles.thinkingDot, { opacity: v, transform: [{ scale: v }] }]} />
+      ))}
+    </View>
+  );
 }
 
 export default function HomeScreen() {
   const {
-    state: speechState,
+    speechState,
+    assistantState,
     transcript,
     interimTranscript,
-    intentResult,
-    error: speechError,
+    error,
     isSupported,
     isListening,
-    startListening,
-    stopListening,
-  } = useSpeechRecognition();
-
-  const {
-    state: assistantState,
+    isActive,
     messages,
-    error: conversationError,
-    processInput,
-  } = useConversation();
+    toggle,
+  } = useConversationMode();
 
   const phase = computePhase(speechState, assistantState);
-  const error = speechError || conversationError;
   const active = isListening || assistantState === 'thinking' || assistantState === 'speaking';
+  const hasTranscript = !!(interimTranscript || transcript);
 
   const scrollRef = useRef<ScrollView>(null);
-  const prevTranscriptRef = useRef('');
 
-  // Gentle "energy" pulse for the orb — RN Animated only (faster while active).
+  // ── Ambient motion (all native-driver: transform / opacity only) ───────────
+  // Orb breathing.
   const pulse = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, {
           toValue: 1,
-          duration: active ? 1100 : 2600,
+          duration: active ? Duration.pulseActive : Duration.pulse,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
         Animated.timing(pulse, {
           toValue: 0,
-          duration: active ? 1100 : 2600,
+          duration: active ? Duration.pulseActive : Duration.pulse,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
@@ -120,24 +144,72 @@ export default function HomeScreen() {
     return () => loop.stop();
   }, [pulse, active]);
 
-  const orbScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, active ? 1.12 : 1.06] });
-  const glowOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, active ? 0.95 : 0.8] });
-  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, active ? 1.28 : 1.18] });
-
-  // HAND-OFF: when a final transcript exists and both machines are idle, process it once.
+  // Orb floating (vertical drift).
+  const float = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    if (
-      transcript &&
-      transcript.trim().length > 0 &&
-      speechState === 'idle' &&
-      assistantState === 'idle' &&
-      prevTranscriptRef.current !== transcript
-    ) {
-      prevTranscriptRef.current = transcript;
-      console.log('[FLOWDBG 4] hand-off -> processInput:', JSON.stringify(transcript));
-      processInput(transcript, intentResult);
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(float, { toValue: 1, duration: Duration.float, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(float, { toValue: 0, duration: Duration.float, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [float]);
+
+  // Ambient background glows (slow blur movement).
+  const drift1 = useRef(new Animated.Value(0)).current;
+  const drift2 = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const mk = (v: Animated.Value, dur: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(v, { toValue: 1, duration: dur, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+          Animated.timing(v, { toValue: 0, duration: dur, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        ])
+      );
+    const a = mk(drift1, Duration.drift);
+    const b = mk(drift2, Math.round(Duration.drift * 1.4));
+    a.start();
+    b.start();
+    return () => {
+      a.stop();
+      b.stop();
+    };
+  }, [drift1, drift2]);
+
+  // Microphone "morph" glow while listening.
+  const micGlow = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!isListening) {
+      micGlow.setValue(0);
+      return;
     }
-  }, [transcript, speechState, assistantState, intentResult, processInput]);
+    const loop = Animated.loop(
+      Animated.timing(micGlow, { toValue: 1, duration: Duration.ring, easing: Easing.out(Easing.ease), useNativeDriver: true })
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      micGlow.setValue(0);
+    };
+  }, [isListening, micGlow]);
+
+  const orbScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, active ? 1.1 : 1.05] });
+  const glowOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, active ? 0.85 : 0.65] });
+  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, active ? 1.22 : 1.14] });
+  const floatY = float.interpolate({ inputRange: [0, 1], outputRange: [9, -9] });
+  const drift1X = drift1.interpolate({ inputRange: [0, 1], outputRange: [-24, 28] });
+  const drift1Y = drift1.interpolate({ inputRange: [0, 1], outputRange: [0, 44] });
+  const drift1S = drift1.interpolate({ inputRange: [0, 1], outputRange: [1, 1.18] });
+  const drift2X = drift2.interpolate({ inputRange: [0, 1], outputRange: [22, -30] });
+  const drift2Y = drift2.interpolate({ inputRange: [0, 1], outputRange: [12, -28] });
+  const drift2S = drift2.interpolate({ inputRange: [0, 1], outputRange: [1.12, 0.94] });
+  const micGlowScale = micGlow.interpolate({ inputRange: [0, 1], outputRange: [1, 1.8] });
+  const micGlowOpacity = micGlow.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] });
+
+  // Hand-off (transcript → Gemini) and the continuous listen↔speak loop are
+  // owned by useConversationMode; this screen only renders the resulting state.
 
   // Auto-scroll to newest message.
   useEffect(() => {
@@ -148,53 +220,57 @@ export default function HomeScreen() {
 
   const handleMic = () => {
     if (!isSupported) return; // gracefully no-op on unsupported runtimes (e.g. Expo Go)
-    if (isListening) {
-      stopListening();
-    } else {
-      startListening();
-    }
+    toggle(); // one tap starts the hands-free conversation; tap again to stop
   };
 
   return (
     <View style={styles.root}>
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
-      {/* Soft pink -> lavender -> blue glassmorphism backdrop */}
+      {/* Deep ambient backdrop */}
       <LinearGradient
-        colors={['#FFE3EF', '#F3E8FF', '#E2F0FF']}
-        locations={[0, 0.5, 1]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
+        colors={Colors.surface.gradient}
+        locations={[0, 0.55, 1]}
+        start={{ x: 0.2, y: 0 }}
+        end={{ x: 0.8, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
-      {/* Blurred colour blobs for depth */}
-      <View style={[styles.blob, styles.blobPink]} />
-      <View style={[styles.blob, styles.blobBlue]} />
+      {/* Slow-drifting soft light sources for depth */}
+      <Animated.View
+        style={[
+          styles.glow,
+          styles.glowViolet,
+          { transform: [{ translateX: drift1X }, { translateY: drift1Y }, { scale: drift1S }] },
+        ]}
+      />
+      <Animated.View
+        style={[
+          styles.glow,
+          styles.glowBlue,
+          { transform: [{ translateX: drift2X }, { translateY: drift2Y }, { scale: drift2S }] },
+        ]}
+      />
 
       <SafeAreaView style={styles.safe}>
         {/* Header */}
         <View style={styles.header}>
-          <BlurView intensity={40} tint="light" style={styles.iconPill}>
-            <TouchableOpacity activeOpacity={0.7} style={styles.iconBtn}>
-              <Menu size={20} color="#6D5BD0" strokeWidth={2} />
-            </TouchableOpacity>
-          </BlurView>
+          <TouchableOpacity activeOpacity={0.7} style={styles.iconPill}>
+            <Menu size={20} color={Colors.onDark.secondary} strokeWidth={1.8} />
+          </TouchableOpacity>
 
           <View style={styles.titleBlock}>
             <Text style={styles.title}>JISSI</Text>
             <Text style={styles.subtitle}>AI Assistant</Text>
           </View>
 
-          <BlurView intensity={40} tint="light" style={styles.iconPill}>
-            <TouchableOpacity activeOpacity={0.7} style={styles.iconBtn}>
-              <Settings size={20} color="#6D5BD0" strokeWidth={2} />
-            </TouchableOpacity>
-          </BlurView>
+          <TouchableOpacity activeOpacity={0.7} style={styles.iconPill}>
+            <Settings size={20} color={Colors.onDark.secondary} strokeWidth={1.8} />
+          </TouchableOpacity>
         </View>
 
         {/* Status pill */}
         <View style={styles.statusWrap}>
-          <BlurView intensity={30} tint="light" style={styles.statusPill}>
+          <BlurView intensity={24} tint="dark" style={styles.statusPill}>
             <View style={[styles.statusDot, { backgroundColor: phaseColor(phase) }]} />
             <Text style={styles.statusText}>{phaseLabel(phase, isSupported)}</Text>
           </BlurView>
@@ -214,59 +290,66 @@ export default function HomeScreen() {
               ))}
             </ScrollView>
           ) : (
-            <>
+            <Animated.View style={[styles.orbWrap, { transform: [{ translateY: floatY }] }]}>
               <Animated.View
-                style={[styles.ring, { transform: [{ scale: ringScale }], opacity: glowOpacity }]}
+                style={[styles.halo, { opacity: glowOpacity, transform: [{ scale: ringScale }] }]}
               />
-              <Animated.View style={[styles.glow, { opacity: glowOpacity }]} />
+              <Animated.View
+                style={[styles.ring, { opacity: glowOpacity, transform: [{ scale: ringScale }] }]}
+              />
               <Animated.View style={[styles.orb, { transform: [{ scale: orbScale }] }]}>
                 <LinearGradient
-                  colors={['#8FD3FF', '#A88BFF', '#FF9EC4']}
-                  start={{ x: 0.1, y: 0.1 }}
-                  end={{ x: 0.9, y: 0.9 }}
+                  colors={Colors.premiumGradient.orb}
+                  start={{ x: 0.15, y: 0.1 }}
+                  end={{ x: 0.85, y: 0.95 }}
                   style={styles.orbFill}
                 >
                   <View style={styles.orbHighlight} />
-                  <Sparkles size={34} color="rgba(255,255,255,0.9)" strokeWidth={1.6} />
+                  <Sparkles size={30} color={Colors.onDark.primary} strokeWidth={1.4} />
                 </LinearGradient>
               </Animated.View>
-            </>
+            </Animated.View>
           )}
         </View>
 
-        {/* Live transcript / interim / error (single slot — design preserved) */}
+        {/* Live transcript / interim / error / thinking (single slot) */}
         {error ? (
           <Text style={[styles.tagline, styles.errorText]}>{error}</Text>
+        ) : phase === 'thinking' ? (
+          <ThinkingDots />
         ) : (
-          <Text style={styles.tagline}>
+          <Text style={[styles.tagline, hasTranscript && styles.taglineActive]}>
             {interimTranscript || transcript || 'Your luxury AI companion'}
           </Text>
         )}
 
-        {/* Bottom mic area — wired to startListening / stopListening */}
+        {/* Bottom mic dock — wired to startListening / stopListening */}
         <View style={styles.micArea}>
-          <BlurView intensity={50} tint="light" style={styles.micCard}>
-            <TouchableOpacity
-              activeOpacity={0.85}
-              style={[styles.micBtnWrap, { opacity: isSupported ? 1 : 0.4 }]}
-              onPress={handleMic}
-              disabled={!isSupported}
-            >
-              <LinearGradient
-                colors={isListening ? ['#FF9EC4', '#A88BFF'] : ['#A88BFF', '#7CB8FF']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.micBtn}
+          <BlurView intensity={36} tint="dark" style={styles.micCard}>
+            <View style={styles.micButtonWrap}>
+              {isListening && (
+                <Animated.View
+                  style={[styles.micGlowRing, { transform: [{ scale: micGlowScale }], opacity: micGlowOpacity }]}
+                />
+              )}
+              <TouchableOpacity
+                activeOpacity={0.85}
+                style={{ opacity: isSupported ? 1 : 0.4 }}
+                onPress={handleMic}
+                disabled={!isSupported}
               >
-                <Mic size={28} color="#FFFFFF" strokeWidth={2} />
-              </LinearGradient>
-            </TouchableOpacity>
+                <LinearGradient
+                  colors={isActive ? Colors.premiumGradient.micActive : Colors.premiumGradient.micIdle}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.micBtn}
+                >
+                  <Mic size={26} color={Colors.onDark.primary} strokeWidth={2} />
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
             <Text style={styles.micHint}>
-              {!isSupported
-                ? 'Speech recognition unavailable here'
-                : isListening
-                ? 'Tap to stop'
-                : 'Tap to speak'}
+              {!isSupported ? 'Unavailable here' : isActive ? 'Tap to stop' : 'Tap to speak'}
             </Text>
           </BlurView>
         </View>
@@ -276,121 +359,146 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F3E8FF' },
-  safe: { flex: 1, paddingHorizontal: 22 },
+  root: { flex: 1, backgroundColor: Colors.surface.void },
+  safe: { flex: 1, paddingHorizontal: Spacing.screen },
 
-  blob: { position: 'absolute', borderRadius: 999 },
-  blobPink: { width: 320, height: 320, top: -60, right: -80, backgroundColor: 'rgba(255,158,196,0.45)' },
-  blobBlue: { width: 300, height: 300, bottom: 40, left: -90, backgroundColor: 'rgba(124,184,255,0.40)' },
+  glow: { position: 'absolute', borderRadius: Radius.circle },
+  glowViolet: { width: 380, height: 380, top: -130, left: -110, backgroundColor: Colors.ambient.violet },
+  glowBlue: { width: 360, height: 360, bottom: -90, right: -130, backgroundColor: Colors.ambient.blue },
 
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: Spacing.md },
   iconPill: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    overflow: 'hidden',
+    width: 44,
+    height: 44,
+    borderRadius: Radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.frost.fill,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.6)',
+    borderColor: Colors.frost.border,
   },
-  iconBtn: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   titleBlock: { alignItems: 'center', flex: 1 },
   title: {
-    fontSize: 36,
+    fontSize: 34,
     fontFamily: 'Exo2_700Bold',
-    letterSpacing: 10,
-    color: '#5B4B9E',
-    textShadowColor: 'rgba(168,139,255,0.4)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 12,
+    letterSpacing: 12,
+    color: Colors.onDark.primary,
+    textShadowColor: Colors.ambient.halo,
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 18,
   },
-  subtitle: { fontSize: 12, color: '#8B83AE', letterSpacing: 1, marginTop: 2, fontFamily: 'Inter_400Regular' },
+  subtitle: {
+    fontSize: 10,
+    color: Colors.onDark.muted,
+    letterSpacing: 4,
+    marginTop: 4,
+    fontFamily: 'Inter_600SemiBold',
+    textTransform: 'uppercase',
+  },
 
-  statusWrap: { alignItems: 'center', marginTop: 14 },
+  statusWrap: { alignItems: 'center', marginTop: Spacing.xl },
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 7,
-    borderRadius: 99,
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.pill,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.6)',
+    borderColor: Colors.frost.border,
+    backgroundColor: Colors.frost.fill,
   },
-  statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#34D399' },
-  statusText: { fontSize: 13, color: '#5C5680', fontFamily: 'Inter_600SemiBold', letterSpacing: 0.4 },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  statusText: {
+    fontSize: 11,
+    color: Colors.onDark.secondary,
+    fontFamily: 'Inter_600SemiBold',
+    letterSpacing: 1.6,
+    textTransform: 'uppercase',
+  },
 
   orbArea: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   messages: { alignSelf: 'stretch', flex: 1 },
-  messagesContent: { paddingVertical: 12, gap: 2 },
+  messagesContent: { paddingVertical: Spacing.lg, gap: Spacing.xs },
+
+  orbWrap: { alignItems: 'center', justifyContent: 'center' },
+  halo: { position: 'absolute', width: 320, height: 320, borderRadius: 160, backgroundColor: Colors.ambient.halo },
   ring: {
     position: 'absolute',
-    width: 300,
-    height: 300,
-    borderRadius: 150,
+    width: 268,
+    height: 268,
+    borderRadius: 134,
     borderWidth: 1,
-    borderColor: 'rgba(168,139,255,0.45)',
+    borderColor: Colors.frost.border,
   },
-  glow: {
-    position: 'absolute',
-    width: 262,
-    height: 262,
-    borderRadius: 131,
-    backgroundColor: 'rgba(168,139,255,0.35)',
-  },
-  orb: {
-    width: 210,
-    height: 210,
-    borderRadius: 105,
-    shadowColor: '#A88BFF',
-    shadowOpacity: 0.6,
-    shadowRadius: 30,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 12,
-  },
-  orbFill: {
-    flex: 1,
-    borderRadius: 105,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
+  orb: { width: 196, height: 196, borderRadius: 98, ...Elevation.orbDark },
+  orbFill: { flex: 1, borderRadius: 98, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   orbHighlight: {
     position: 'absolute',
-    top: 26,
-    left: 40,
-    width: 70,
-    height: 40,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255,255,255,0.45)',
+    top: 22,
+    left: 38,
+    width: 66,
+    height: 38,
+    borderRadius: 38,
+    backgroundColor: Colors.frost.specular,
     transform: [{ rotate: '-20deg' }],
   },
 
-  tagline: { textAlign: 'center', color: '#7B7399', fontSize: 14, fontFamily: 'Inter_400Regular', marginBottom: 8, paddingHorizontal: 8 },
-  errorText: { color: '#E11D7A' },
-
-  micArea: { paddingBottom: 18 },
-  micCard: {
-    borderRadius: 28,
-    overflow: 'hidden',
-    paddingVertical: 22,
-    alignItems: 'center',
-    gap: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.6)',
+  tagline: {
+    textAlign: 'center',
+    color: Colors.onDark.muted,
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    marginBottom: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    letterSpacing: 0.5,
   },
-  micBtnWrap: { borderRadius: 40 },
+  taglineActive: { color: Colors.onDark.secondary },
+  errorText: { color: Colors.status.error },
+
+  thinkingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 18,
+    marginBottom: Spacing.md,
+  },
+  thinkingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.onDark.secondary },
+
+  micArea: { paddingBottom: Spacing.xl },
+  micCard: {
+    borderRadius: Radius.xl3,
+    overflow: 'hidden',
+    paddingVertical: Spacing.xxl,
+    alignItems: 'center',
+    gap: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.frost.border,
+    backgroundColor: Colors.frost.fill,
+  },
+  micButtonWrap: { width: 84, height: 84, alignItems: 'center', justifyContent: 'center' },
+  micGlowRing: {
+    position: 'absolute',
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: Colors.ambient.micGlow,
+  },
   micBtn: {
     width: 76,
     height: 76,
     borderRadius: 38,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#7CB8FF',
-    shadowOpacity: 0.5,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+    ...Elevation.micDark,
   },
-  micHint: { fontSize: 13, color: '#8B83AE', fontFamily: 'Inter_400Regular', letterSpacing: 0.4 },
+  micHint: {
+    fontSize: 12,
+    color: Colors.onDark.muted,
+    fontFamily: 'Inter_400Regular',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
 });

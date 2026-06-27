@@ -2,7 +2,8 @@ import React from 'react';
 import { StyleSheet, Text } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { WaveformAnimation } from '@/components/WaveformAnimation';
-import { JISSI } from '@/constants/jissiPalette';
+import { Colors } from '@/constants/colors';
+import { Spacing, Radius } from '@/constants/theme';
 
 interface ListeningCardProps {
   isListening: boolean;
@@ -22,15 +23,15 @@ export function ListeningCard({ isListening, interimTranscript }: ListeningCardP
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 24,
+    borderRadius: Radius.xl,
     overflow: 'hidden',
     paddingVertical: 18,
-    paddingHorizontal: 20,
+    paddingHorizontal: Spacing.xl,
     alignItems: 'center',
-    gap: 12,
+    gap: Spacing.md,
     borderWidth: 1,
-    borderColor: JISSI.glassBorder,
+    borderColor: Colors.border.glassStrong,
   },
-  label: { fontSize: 14, color: JISSI.textDark, fontFamily: 'Inter_600SemiBold', letterSpacing: 0.4 },
-  interim: { fontSize: 14, color: JISSI.textMuted, fontFamily: 'Inter_400Regular', textAlign: 'center' },
+  label: { fontSize: 14, color: Colors.text.primary, fontFamily: 'Inter_600SemiBold', letterSpacing: 0.4 },
+  interim: { fontSize: 14, color: Colors.text.muted, fontFamily: 'Inter_400Regular', textAlign: 'center' },
 });

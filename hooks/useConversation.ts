@@ -61,6 +61,9 @@ export function useConversation(): UseConversationResult {
   const [ttsState, setTTSState] = useState<TTSState>('idle');
 
   const isInitializedRef = useRef(false);
+  // Single-flight lock: prevents a second overlapping request (and thus a
+  // duplicate Gemini/action call) while one is already being processed.
+  const isProcessingRef = useRef(false);
 
   // Bridge the external TTSService state machine into React.
   useEffect(() => {
@@ -121,9 +124,25 @@ export function useConversation(): UseConversationResult {
    */
   const processInput = useCallback(
     async (input: string, intent?: IntentResult | null): Promise<void> => {
+      // TEMP (Phase 2.3) correlation id for this user message across the pipeline.
+      const reqId = `pi_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       console.log('[FLOWDBG 5] processInput entry. input=', JSON.stringify(input), 'intent=', intent?.intent);
+      console.log(`[REQDBG] processInput ENTER reqId=${reqId} ts=${Date.now()}`);
       if (!input || input.trim().length === 0) return;
 
+      // Single-flight: ignore new input while a request is already in flight.
+      // With the hand-off's transcript de-dupe (index.tsx prevTranscriptRef) this
+      // guarantees exactly one Gemini/action request per user utterance.
+      if (isProcessingRef.current) {
+        console.log(`[REQDBG] processInput IGNORED reqId=${reqId} — a request is already in flight`);
+        return;
+      }
+      isProcessingRef.current = true;
+
+      // try/finally guarantees the lock is released on EVERY exit path: the
+      // action-branch early return, the not-initialized return, normal
+      // completion, and any thrown error.
+      try {
       setError(null);
       setLastResponse(null);
       setLastActionResult(null);
@@ -201,6 +220,10 @@ export function useConversation(): UseConversationResult {
         setMessages((prev) => [...prev, assistantMessage]);
       } finally {
         setState('idle');
+      }
+      } finally {
+        isProcessingRef.current = false;
+        console.log(`[REQDBG] processInput EXIT reqId=${reqId} ts=${Date.now()}`);
       }
     },
     [currentConversation]

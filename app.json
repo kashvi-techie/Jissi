@@ -11,16 +11,12 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "JISSI needs microphone access to recognize your voice."
+        "NSMicrophoneUsageDescription": "JISSI needs microphone access to recognize your voice.",
+        "NSSpeechRecognitionUsageDescription": "JISSI uses speech recognition to turn your voice into commands."
       }
     },
     "android": {
       "permissions": [
-        "RECORD_AUDIO",
-        "android.permission.SYSTEM_ALERT_WINDOW",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
-        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
         "RECORD_AUDIO",
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.FOREGROUND_SERVICE",

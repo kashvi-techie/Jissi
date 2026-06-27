@@ -34,7 +34,7 @@ export interface UseSpeechRecognitionResult {
  * Speech-to-text hook.
  *
  * Owns the microphone lifecycle and exposes the live transcript plus the intent
- * detected from it. All platform differences (native `@react-native-voice/voice`
+ * detected from it. All platform differences (native `expo-speech-recognition`
  * vs the browser Web Speech API) are encapsulated inside {@link SpeechService},
  * so this hook stays platform-agnostic.
  *
@@ -121,6 +121,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
       onSpeechResults: (results: string[]) => {
         const finalChunk = results[0] || '';
         console.log('[FLOWDBG 2] transcript chunk:', JSON.stringify(finalChunk));
+        console.log(`[REQDBG] transcript received (final chunk) ts=${Date.now()} chunkLen=${finalChunk.length}`);
         // Accumulate the final transcript and recompute the intent from the
         // full text. Functional update keeps this correct across re-renders.
         setTranscript((prev) => {

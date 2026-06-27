@@ -2,7 +2,8 @@ import React, { useEffect, useRef } from 'react';
 import { StyleSheet, View, Pressable, Animated, Easing } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Mic } from 'lucide-react-native';
-import { JISSI } from '@/constants/jissiPalette';
+import { Colors } from '@/constants/colors';
+import { Duration, Elevation } from '@/constants/theme';
 
 interface MicrophoneButtonProps {
   isListening: boolean;
@@ -20,7 +21,7 @@ export function MicrophoneButton({ isListening, onPress }: MicrophoneButtonProps
       Animated.loop(
         Animated.timing(v, {
           toValue: 1,
-          duration: 1800,
+          duration: Duration.ring,
           delay,
           easing: Easing.out(Easing.ease),
           useNativeDriver: true,
@@ -54,12 +55,16 @@ export function MicrophoneButton({ isListening, onPress }: MicrophoneButtonProps
           onPressOut={() => Animated.spring(press, { toValue: 1, useNativeDriver: true }).start()}
         >
           <LinearGradient
-            colors={isListening ? [JISSI.pink, JISSI.lavender] : [JISSI.lavender, JISSI.blue]}
+            colors={
+              isListening
+                ? [Colors.brand.pink, Colors.brand.lavender]
+                : [Colors.brand.lavender, Colors.brand.blue]
+            }
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.button}
           >
-            <Mic size={40} color="#FFFFFF" strokeWidth={2} />
+            <Mic size={40} color={Colors.text.onColor} strokeWidth={2} />
           </LinearGradient>
         </Pressable>
       </Animated.View>
@@ -69,17 +74,13 @@ export function MicrophoneButton({ isListening, onPress }: MicrophoneButtonProps
 
 const styles = StyleSheet.create({
   wrap: { width: 160, height: 160, alignItems: 'center', justifyContent: 'center' },
-  ring: { position: 'absolute', width: 120, height: 120, borderRadius: 60, backgroundColor: JISSI.lavender },
+  ring: { position: 'absolute', width: 120, height: 120, borderRadius: 60, backgroundColor: Colors.brand.lavender },
   button: {
     width: 120,
     height: 120,
     borderRadius: 60,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: JISSI.lavender,
-    shadowOpacity: 0.5,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 10,
+    ...Elevation.micButton,
   },
 });

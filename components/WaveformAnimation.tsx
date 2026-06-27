@@ -1,13 +1,14 @@
 import React, { useEffect, useRef } from 'react';
 import { StyleSheet, View, Animated, Easing } from 'react-native';
-import { JISSI } from '@/constants/jissiPalette';
+import { Colors } from '@/constants/colors';
+import { Spacing, Duration } from '@/constants/theme';
 
 interface WaveformAnimationProps {
   isActive: boolean;
 }
 
 const BAR_COUNT = 24;
-const COLORS = [JISSI.pink, JISSI.lavender, JISSI.blue];
+const BAR_COLORS = [Colors.brand.pink, Colors.brand.lavender, Colors.brand.blue];
 
 function Bar({ index, isActive }: { index: number; isActive: boolean }) {
   const h = useRef(new Animated.Value(0.2)).current;
@@ -20,14 +21,14 @@ function Bar({ index, isActive }: { index: number; isActive: boolean }) {
       Animated.sequence([
         Animated.timing(h, {
           toValue: 1,
-          duration: 400 + (index % 5) * 90,
+          duration: Duration.base + (index % 5) * 90,
           delay: index * 30,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: false,
         }),
         Animated.timing(h, {
           toValue: 0.25,
-          duration: 400 + (index % 5) * 90,
+          duration: Duration.base + (index % 5) * 90,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: false,
         }),
@@ -41,7 +42,7 @@ function Bar({ index, isActive }: { index: number; isActive: boolean }) {
   }, [isActive, h, index]);
 
   const height = h.interpolate({ inputRange: [0, 1], outputRange: [6, 44] });
-  return <Animated.View style={[styles.bar, { height, backgroundColor: COLORS[index % COLORS.length] }]} />;
+  return <Animated.View style={[styles.bar, { height, backgroundColor: BAR_COLORS[index % BAR_COLORS.length] }]} />;
 }
 
 export function WaveformAnimation({ isActive }: WaveformAnimationProps) {
@@ -55,6 +56,6 @@ export function WaveformAnimation({ isActive }: WaveformAnimationProps) {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, height: 48 },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.xs, height: 48 },
   bar: { width: 4, borderRadius: 3 },
 });

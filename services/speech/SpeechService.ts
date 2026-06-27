@@ -1,8 +1,8 @@
-import { Platform, NativeModules } from 'react-native';
-import Voice, {
-  SpeechResultsEvent,
-  SpeechErrorEvent,
-} from '@react-native-voice/voice';
+import { Platform, AppState, AppStateStatus } from 'react-native';
+import type {
+  ExpoSpeechRecognitionResultEvent,
+  ExpoSpeechRecognitionErrorEvent,
+} from 'expo-speech-recognition';
 
 export type SpeechState = 'idle' | 'listening' | 'processing' | 'error';
 
@@ -36,18 +36,37 @@ declare global {
   }
 }
 
-let voiceAvailable = false;
+// ── Native engine: expo-speech-recognition ──────────────────────────────────
+// Loaded via require() inside try/catch so the app DEGRADES GRACEFULLY in Expo
+// Go (where the native module is absent) instead of crashing at import. In a
+// Development Build the native module is present and require() succeeds. The
+// payload TYPES are `import type` only (erased at compile time → no runtime
+// import), so they never trigger the native lookup.
+type EventSub = { remove: () => void };
+type ESRStartOptions = {
+  lang?: string;
+  interimResults?: boolean;
+  continuous?: boolean;
+  requiresOnDeviceRecognition?: boolean;
+};
+interface ESRModule {
+  start: (options: ESRStartOptions) => void;
+  stop: () => void;
+  abort: () => void;
+  isRecognitionAvailable: () => boolean;
+  requestPermissionsAsync: () => Promise<{ granted: boolean }>;
+  getPermissionsAsync: () => Promise<{ granted: boolean }>;
+  addListener: <E>(event: string, listener: (ev: E) => void) => EventSub;
+}
 
+let ExpoSpeechRecognition: ESRModule | null = null;
 try {
-  // The default `Voice` export is a JS wrapper that exists even in Expo Go, but
-  // the actual native module (NativeModules.Voice) is null there. Checking the
-  // native module avoids "cannot read property 'startSpeech' of null" crashes and
-  // makes isSupported() correctly return false when there's no native build.
-  if (Platform.OS !== 'web' && NativeModules.Voice) {
-    voiceAvailable = true;
+  if (Platform.OS !== 'web') {
+    ExpoSpeechRecognition = require('expo-speech-recognition').ExpoSpeechRecognitionModule as ESRModule;
   }
 } catch {
-  voiceAvailable = false;
+  // Native module not bundled (e.g. Expo Go) — isSupported() will report false.
+  ExpoSpeechRecognition = null;
 }
 
 class SpeechServiceImpl {
@@ -55,17 +74,21 @@ class SpeechServiceImpl {
   private isListening = false;
   private callbacks: SpeechRecognitionCallbacks = {};
   private webRecognition: WebSpeechRecognition | null = null;
-  private nativeAvailable = voiceAvailable;
+  private nativeAvailable = ExpoSpeechRecognition != null;
+  private subscriptions: EventSub[] = [];
+  private appStateSub: EventSub | null = null;
 
   async initialize(callbacks: SpeechRecognitionCallbacks): Promise<void> {
     this.callbacks = callbacks;
 
     if (Platform.OS === 'web') {
       await this.initializeWeb();
-    } else if (this.nativeAvailable && Voice) {
-      await this.initializeNative();
+    } else if (this.nativeAvailable && ExpoSpeechRecognition) {
+      this.initializeNative();
     } else {
-      console.warn('Native speech recognition not available - running in compatibility mode');
+      console.warn(
+        'Native speech recognition unavailable (Expo Go?) — requires a Development Build.'
+      );
     }
 
     this.isInitialized = true;
@@ -123,50 +146,75 @@ class SpeechServiceImpl {
     };
   }
 
-  private async initializeNative(): Promise<void> {
-    if (!Voice) {
-      console.warn('Voice module not available');
-      return;
-    }
+  private initializeNative(): void {
+    if (!ExpoSpeechRecognition) return;
 
-    Voice.onSpeechStart = () => {
+    // Idempotent across React remounts / Android Activity recreation: drop any
+    // stale subscriptions before (re)registering so listeners never stack.
+    this.removeSubscriptions();
+
+    const mod = ExpoSpeechRecognition;
+    const add = <E>(event: string, listener: (ev: E) => void) => {
+      this.subscriptions.push(mod.addListener<E>(event, listener));
+    };
+
+    add<null>('start', () => {
       this.isListening = true;
       this.callbacks.onSpeechStart?.();
-    };
-
-    Voice.onSpeechEnd = () => {
+    });
+    add<null>('end', () => {
       this.isListening = false;
       this.callbacks.onSpeechEnd?.();
-    };
-
-    Voice.onSpeechResults = (event: SpeechResultsEvent) => {
-      if (event.value && event.value.length > 0) {
-        this.callbacks.onSpeechResults?.(event.value);
+    });
+    add<ExpoSpeechRecognitionResultEvent>('result', (ev) => {
+      const transcripts = (ev.results ?? []).map((r) => r.transcript).filter(Boolean);
+      if (transcripts.length === 0) return;
+      if (ev.isFinal) {
+        this.callbacks.onSpeechResults?.(transcripts);
+      } else {
+        this.callbacks.onSpeechPartialResults?.(transcripts);
       }
-    };
+    });
+    add<ExpoSpeechRecognitionErrorEvent>('error', (ev) => {
+      this.isListening = false;
+      this.callbacks.onSpeechError?.(ev.message || ev.error || 'Unknown speech error');
+    });
+    add<{ value: number }>('volumechange', (ev) => {
+      this.callbacks.onVolumeChanged?.(ev.value);
+    });
 
-    Voice.onSpeechPartialResults = (event: SpeechResultsEvent) => {
-      if (event.value && event.value.length > 0) {
-        this.callbacks.onSpeechPartialResults?.(event.value);
-      }
-    };
+    // Release the recognizer when the app leaves the foreground. Prevents a
+    // stuck mic / dangling native session after the Activity is paused, and
+    // covers Android Activity recreation while listening.
+    this.appStateSub?.remove();
+    this.appStateSub = AppState.addEventListener('change', this.handleAppStateChange);
+  }
 
-    Voice.onSpeechError = (event: SpeechErrorEvent) => {
-      const errorMessage = event.error?.message || event.error?.code || 'Unknown speech error';
-      this.callbacks.onSpeechError?.(errorMessage);
-    };
+  private handleAppStateChange = (next: AppStateStatus): void => {
+    if (next !== 'active' && this.isListening) {
+      this.cancelListening();
+    }
+  };
 
-    Voice.onSpeechVolumeChanged = (event: any) => {
-      if (event.value !== undefined) {
-        this.callbacks.onVolumeChanged?.(event.value);
-      }
-    };
+  /** Requests mic + speech-recognition permission on native (no-op prompt on web). */
+  private async ensureNativePermission(): Promise<boolean> {
+    if (!ExpoSpeechRecognition) return false;
+    try {
+      const current = await ExpoSpeechRecognition.getPermissionsAsync();
+      if (current.granted) return true;
+      const requested = await ExpoSpeechRecognition.requestPermissionsAsync();
+      return !!requested.granted;
+    } catch {
+      return false;
+    }
   }
 
   isSupported(): boolean {
     if (Platform.OS === 'web') {
-      return typeof window !== 'undefined' &&
-        !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+      return (
+        typeof window !== 'undefined' &&
+        !!(window.SpeechRecognition || window.webkitSpeechRecognition)
+      );
     }
     return this.nativeAvailable;
   }
@@ -180,11 +228,8 @@ class SpeechServiceImpl {
       throw new Error('SpeechService not initialized. Call initialize() first.');
     }
 
-    // Hard guard against duplicate starts. `isListening` is also flipped
-    // asynchronously by the onstart/onSpeechStart callbacks, so we set it
-    // synchronously here to close the race window where two rapid calls both pass
-    // the guard and call start() twice — which makes the Web SpeechRecognition
-    // throw "recognition has already started".
+    // Hard guard against duplicate starts; set synchronously to close the race
+    // window where two rapid calls both pass the guard.
     if (this.isListening) {
       return;
     }
@@ -195,14 +240,19 @@ class SpeechServiceImpl {
         try {
           this.webRecognition?.start();
         } catch (e) {
-          // Ignore the specific "already started" race; recognition is running.
           const msg = e instanceof Error ? e.message : String(e);
           if (!/already started/i.test(msg)) {
             throw e;
           }
         }
-      } else if (this.nativeAvailable && Voice) {
-        await Voice.start(locale);
+      } else if (this.nativeAvailable && ExpoSpeechRecognition) {
+        const granted = await this.ensureNativePermission();
+        if (!granted) {
+          this.isListening = false;
+          this.callbacks.onSpeechError?.('not-allowed: microphone or speech permission was denied.');
+          return;
+        }
+        ExpoSpeechRecognition.start({ lang: locale, interimResults: true, continuous: false });
       } else {
         // Unsupported runtime (e.g. Expo Go without the native module): fail
         // gracefully — never throw a runtime error.
@@ -211,7 +261,6 @@ class SpeechServiceImpl {
         return;
       }
     } catch (error) {
-      // Genuine failure: reset so the user can retry.
       this.isListening = false;
       const message = error instanceof Error ? error.message : 'Failed to start listening';
       this.callbacks.onSpeechError?.(message);
@@ -225,8 +274,8 @@ class SpeechServiceImpl {
     try {
       if (Platform.OS === 'web') {
         this.webRecognition?.stop();
-      } else if (this.nativeAvailable && Voice) {
-        await Voice.stop();
+      } else if (this.nativeAvailable && ExpoSpeechRecognition) {
+        ExpoSpeechRecognition.stop();
       }
       this.isListening = false;
     } catch (error) {
@@ -239,28 +288,46 @@ class SpeechServiceImpl {
     try {
       if (Platform.OS === 'web') {
         this.webRecognition?.abort();
-      } else if (this.nativeAvailable && Voice) {
-        await Voice.cancel();
+      } else if (this.nativeAvailable && ExpoSpeechRecognition) {
+        ExpoSpeechRecognition.abort();
       }
       this.isListening = false;
-    } catch (error) {
+    } catch {
       // Silent fail on cancel
     }
   }
 
   async destroy(): Promise<void> {
     try {
-      if (Platform.OS !== 'web' && this.nativeAvailable && Voice) {
-        await Voice.destroy();
-      } else {
+      if (Platform.OS === 'web') {
         this.webRecognition?.abort();
         this.webRecognition = null;
+      } else if (this.nativeAvailable && ExpoSpeechRecognition) {
+        try {
+          ExpoSpeechRecognition.abort();
+        } catch {
+          // ignore — may already be inactive
+        }
+        this.removeSubscriptions();
+        this.appStateSub?.remove();
+        this.appStateSub = null;
       }
-    } catch (error) {
+    } catch {
       // Silent fail on destroy
     }
     this.isInitialized = false;
     this.isListening = false;
+  }
+
+  private removeSubscriptions(): void {
+    this.subscriptions.forEach((sub) => {
+      try {
+        sub.remove();
+      } catch {
+        // ignore
+      }
+    });
+    this.subscriptions = [];
   }
 
   async getAllLocales(): Promise<string[]> {
@@ -271,12 +338,11 @@ class SpeechServiceImpl {
     if (Platform.OS === 'web') {
       return this.isSupported();
     }
-    if (!this.nativeAvailable || !Voice) {
+    if (!this.nativeAvailable || !ExpoSpeechRecognition) {
       return false;
     }
     try {
-      const available = await Voice.isAvailable();
-      return available === 1;
+      return ExpoSpeechRecognition.isRecognitionAvailable();
     } catch {
       return false;
     }

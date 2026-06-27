@@ -50,4 +50,7 @@ Guidelines:
 - If you don't know something, say so honestly
 - Don't prefix responses with "JISSI:" or similar - just respond naturally`;
 
-export const GEMINI_MODEL = 'gemini-1.5-flash';
+// gemini-1.5-flash was retired (Gemini 1.5 series deprecated Apr 2025, retired ~Sep
+// 2025) and now returns 404 on the v1beta endpoint. Use a current Flash model.
+// Swap to 'gemini-2.5-flash' for the newest generation if preferred.
+export const GEMINI_MODEL = 'gemini-2.0-flash';

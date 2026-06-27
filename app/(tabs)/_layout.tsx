@@ -2,16 +2,8 @@ import React from 'react';
 import { Tabs } from 'expo-router';
 import { Platform, StyleSheet, View } from 'react-native';
 import { Home, Clock, User } from 'lucide-react-native';
-
-// TEMP FALLBACK COLORS (Phase: routing).
-// colors.ts is not restored yet, so the original `Colors.tab.*` tokens are
-// inlined below. Swap these back to `Colors.tab.*` once constants/colors.ts exists.
-const FALLBACK = {
-  tabActive: '#A78BFA', // was Colors.tab.active
-  tabInactive: '#64748B', // was Colors.tab.inactive
-  tabBackground: '#0B0B1A', // was Colors.tab.background
-  tabBorder: 'rgba(255,255,255,0.08)', // was Colors.tab.border
-};
+import { Colors } from '@/constants/colors';
+import { Spacing, Radius } from '@/constants/theme';
 
 function TabBarIcon({
   icon: Icon,
@@ -34,15 +26,15 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: FALLBACK.tabActive,
-        tabBarInactiveTintColor: FALLBACK.tabInactive,
+        tabBarActiveTintColor: Colors.tab.active,
+        tabBarInactiveTintColor: Colors.tab.inactive,
         tabBarStyle: {
-          backgroundColor: FALLBACK.tabBackground,
+          backgroundColor: Colors.tab.background,
           borderTopWidth: 1,
-          borderTopColor: FALLBACK.tabBorder,
+          borderTopColor: Colors.tab.border,
           height: Platform.OS === 'ios' ? 84 : 64,
-          paddingBottom: Platform.OS === 'ios' ? 24 : 8,
-          paddingTop: 8,
+          paddingBottom: Platform.OS === 'ios' ? Spacing.xxl : Spacing.sm,
+          paddingTop: Spacing.sm,
           elevation: 0,
           shadowOpacity: 0,
         },
@@ -91,9 +83,9 @@ const styles = StyleSheet.create({
     height: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 10,
+    borderRadius: Radius.sm,
   },
   tabIconActive: {
-    backgroundColor: 'rgba(139,92,246,0.15)',
+    backgroundColor: Colors.tab.activeChip,
   },
 });

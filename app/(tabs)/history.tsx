@@ -1,27 +1,35 @@
 import React from 'react';
-import { StyleSheet, Text, View, SafeAreaView, StatusBar } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Clock } from 'lucide-react-native';
-import { Colors } from '@/constants/colors';
-import { Spacing } from '@/constants/theme';
+import { Screen, GlassSurface, AppText } from '@/components/ui';
+import { useTheme } from '@/theme';
+import { Radii, Spacing } from '@/theme/tokens';
 
 export default function HistoryScreen() {
+  const theme = useTheme();
+  const { width } = useWindowDimensions();
+  const isWide = width >= 900;
   return (
-    <View style={styles.root}>
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
-      <LinearGradient colors={Colors.background.gradient} style={StyleSheet.absoluteFill} />
-      <SafeAreaView style={styles.safe}>
-        <Clock size={40} color={Colors.accent.indigo} strokeWidth={1.6} />
-        <Text style={styles.title}>History</Text>
-        <Text style={styles.sub}>Coming soon</Text>
-      </SafeAreaView>
-    </View>
+    <Screen>
+      <View style={[styles.center, isWide && styles.centerWide]}>
+        <GlassSurface intensity={36} radius={Radii.circle} style={styles.badge}>
+          <Clock size={30} color={theme.colors.textSecondary} strokeWidth={1.5} />
+        </GlassSurface>
+        <AppText variant="headline" color="primary" style={styles.title}>
+          History
+        </AppText>
+        <AppText variant="body" color="muted" style={styles.sub}>
+          Your conversations will live here.
+        </AppText>
+      </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  safe: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.sm },
-  title: { fontSize: 22, fontFamily: 'Exo2_700Bold', color: Colors.text.heading, letterSpacing: 1 },
-  sub: { fontSize: 14, fontFamily: 'Inter_400Regular', color: Colors.text.muted },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.md },
+  centerWide: { maxWidth: 720, alignSelf: 'center', width: '100%' },
+  badge: { width: 84, height: 84, alignItems: 'center', justifyContent: 'center' },
+  title: { marginTop: Spacing.sm },
+  sub: { textAlign: 'center' },
 });

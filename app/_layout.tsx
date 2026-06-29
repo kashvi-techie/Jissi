@@ -9,6 +9,7 @@ import {
   Exo2_600SemiBold,
 } from '@expo-google-fonts/exo-2';
 import {
+  Inter_300Light,
   Inter_400Regular,
   Inter_600SemiBold,
   Inter_700Bold,
@@ -16,6 +17,10 @@ import {
 import * as SplashScreen from 'expo-splash-screen';
 import { AssistantProvider } from '@/services/AssistantContext';
 import { FloatingOrbOverlay } from '@/components/FloatingOrbOverlay';
+import { ThemeProvider } from '@/theme';
+// Side-effect: installs built-in tools + bridges them into AIService (dormant
+// until EXPO_PUBLIC_TOOLS_ENABLED=true). No runtime effect while the flag is off.
+import '@/services/tools/register';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -26,6 +31,7 @@ export default function RootLayout() {
     Exo2_400Regular,
     Exo2_700Bold,
     Exo2_600SemiBold,
+    Inter_300Light,
     Inter_400Regular,
     Inter_600SemiBold,
     Inter_700Bold,
@@ -42,13 +48,15 @@ export default function RootLayout() {
   }
 
   return (
-    <AssistantProvider>
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="+not-found" />
-      </Stack>
-      <StatusBar style="light" />
-      <FloatingOrbOverlay />
-    </AssistantProvider>
+    <ThemeProvider>
+      <AssistantProvider>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="+not-found" />
+        </Stack>
+        <StatusBar style="light" />
+        <FloatingOrbOverlay />
+      </AssistantProvider>
+    </ThemeProvider>
   );
 }

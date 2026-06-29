@@ -7,5 +7,4 @@ export {
   AIGenerationOptions,
   AIGenerationResult,
   DEFAULT_SYSTEM_PROMPT,
-  GEMINI_MODEL,
 } from './types';

@@ -11,7 +11,7 @@ import { AIMessage } from '@/services/ai';
  * Coordinates the two single-responsibility hooks (useSpeechRecognition +
  * useConversation) into a hands-free loop:
  *
- *   listen → end-of-speech → Gemini → TTS → (cooldown) → listen → …
+ *   listen → end-of-speech → AI → TTS → (cooldown) → listen → …
  *
  * This hook owns ONLY the coordination state machine. STT and the
  * conversation/TTS pipeline stay fully encapsulated in their own hooks, so the
@@ -55,6 +55,9 @@ export interface UseConversationModeResult {
   toggle: () => void;
   start: () => void;
   stop: () => void;
+  /** Seed the conversation with a text prompt (e.g. a suggestion card) and start
+   *  a hands-free session around that topic. */
+  sendPrompt: (text: string) => void;
 }
 
 export function useConversationMode(): UseConversationModeResult {
@@ -125,6 +128,23 @@ export function useConversationMode(): UseConversationModeResult {
     if (isActiveRef.current) stopConversation();
     else startConversation();
   }, [startConversation, stopConversation]);
+
+  /** Start a session seeded with a text prompt (suggestion card). The continuous
+   *  loop then auto-reopens the mic after the assistant replies, so the topic
+   *  flows naturally into a hands-free conversation. */
+  const sendPrompt = useCallback(
+    (text: string) => {
+      const t = text.trim();
+      if (!t) return;
+      isActiveRef.current = true;
+      setIsActive(true);
+      errorCountRef.current = 0;
+      prevTranscriptRef.current = '';
+      clearTimer();
+      processInput(t);
+    },
+    [clearTimer, processInput]
+  );
 
   const scheduleRestart = useCallback(
     (delay: number) => {
@@ -218,5 +238,6 @@ export function useConversationMode(): UseConversationModeResult {
     toggle,
     start: startConversation,
     stop: stopConversation,
+    sendPrompt,
   };
 }

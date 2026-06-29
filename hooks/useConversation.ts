@@ -40,7 +40,7 @@ function isActionIntent(intent: IntentType): boolean {
  * Conversation orchestrator hook.
  *
  * This is the "brain stem" of JISSI: it takes a recognized utterance and routes
- * it to either a device action (ActionService) or the AI (AIService/Gemini),
+ * it to either a device action (ActionService) or the AI (AIService),
  * persists the exchange (ConversationRepository), and speaks the reply
  * (TTSService). The UI only consumes the resulting state.
  *
@@ -62,7 +62,7 @@ export function useConversation(): UseConversationResult {
 
   const isInitializedRef = useRef(false);
   // Single-flight lock: prevents a second overlapping request (and thus a
-  // duplicate Gemini/action call) while one is already being processed.
+  // duplicate AI/action call) while one is already being processed.
   const isProcessingRef = useRef(false);
 
   // Bridge the external TTSService state machine into React.
@@ -105,14 +105,11 @@ export function useConversation(): UseConversationResult {
       });
       setMessages(uniqueMessages);
 
-      const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-      console.log('[FLOWDBG init] GEMINI key present =', !!apiKey, 'len =', apiKey ? apiKey.length : 0);
-      if (apiKey) {
-        AIService.initialize({ apiKey });
-        console.log('[FLOWDBG init] AIService.initialize done. isInitialized =', AIService.isInitialized());
-      } else {
-        console.warn('[FLOWDBG init] Gemini API key NOT found. AI disabled.');
-      }
+      // Initialize the AI service once at startup. It depends ONLY on OpenRouter
+      // (the provider reads EXPO_PUBLIC_OPENROUTER_API_KEY itself); no other env
+      // variable gates initialization.
+      AIService.initialize();
+      console.log('[AI] startup init — isInitialized =', AIService.isInitialized());
     };
 
     init();
@@ -132,7 +129,7 @@ export function useConversation(): UseConversationResult {
 
       // Single-flight: ignore new input while a request is already in flight.
       // With the hand-off's transcript de-dupe (index.tsx prevTranscriptRef) this
-      // guarantees exactly one Gemini/action request per user utterance.
+      // guarantees exactly one AI/action request per user utterance.
       if (isProcessingRef.current) {
         console.log(`[REQDBG] processInput IGNORED reqId=${reqId} — a request is already in flight`);
         return;
@@ -184,9 +181,8 @@ export function useConversation(): UseConversationResult {
       }
 
       // ── Branch 2: AI answer ──────────────────────────────────────────────
-      console.log('[FLOWDBG 6] AI branch. AIService.isInitialized =', AIService.isInitialized());
       if (!AIService.isInitialized()) {
-        console.log('[FLOWDBG STOP] AIService NOT initialized — chain stops here (missing GEMINI key).');
+        console.log('[AI] not initialized — AI service unavailable (check EXPO_PUBLIC_OPENROUTER_API_KEY)');
         setError('AI service is not available. Please check your configuration.');
         setState('idle');
         return;
@@ -194,7 +190,6 @@ export function useConversation(): UseConversationResult {
 
       setState('thinking');
       try {
-        console.log('[FLOWDBG 6b] calling AIService.generate()');
         const result: AIGenerationResult = await AIService.generate(input);
         console.log('[FLOWDBG 8b] generate returned. finishReason=', result.finishReason, 'textLen=', result.text ? result.text.length : 0);
 

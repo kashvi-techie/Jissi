@@ -5,8 +5,25 @@ import {
   AIGenerationResult,
   DEFAULT_SYSTEM_PROMPT,
 } from './types';
-import { AIProvider, ProviderMessage } from './providers/types';
+import { Platform } from 'react-native';
+import {
+  AIProvider,
+  ProviderMessage,
+  ProviderChatResult,
+  ProviderToolCall,
+  ToolSchema,
+} from './providers/types';
 import { OpenRouterProvider } from './providers/OpenRouterProvider';
+
+/**
+ * Generic tool bridge. AIService stays TOOL-AGNOSTIC: it knows only this contract,
+ * never a concrete tool. The tool system (registry + router) is injected via
+ * configureTools() at app init (services/tools/register.ts).
+ */
+export interface AIToolBridge {
+  getSchemas(ctx: { platform: string }): Promise<ToolSchema[]>;
+  execute(calls: ProviderToolCall[], ctx: { platform: string }): Promise<ProviderMessage[]>;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -49,7 +66,7 @@ export interface ProviderErrorInfo {
 /**
  * Inspect an LLM/network failure and classify it. Provider-agnostic: it keys off
  * the HTTP status carried on the thrown error plus message keywords, so it works
- * for any backend (OpenRouter today, Gemini before, etc.).
+ * for any backend (OpenRouter today, others later).
  */
 function classifyProviderError(error: unknown): ProviderErrorInfo {
   const anyErr = error as any;
@@ -115,35 +132,56 @@ let aiRequestCounter = 0;
 
 /**
  * Provider factory — the ONLY place that knows which backend is active.
- * To restore Gemini later: add a GeminiProvider and return it here. Nothing else
- * in the app changes.
+ * To add another backend later: implement AIProvider and return it here. Nothing
+ * else in the app changes.
  */
+// [NETDBG] TEMPORARY: mask a secret for safe logging. Remove with the NETDBG logs.
+function maskKey(k?: string): string {
+  if (!k) return 'UNDEFINED/EMPTY';
+  return k.length <= 12 ? `***(len ${k.length})` : `${k.slice(0, 7)}********${k.slice(-4)} (len ${k.length})`;
+}
+
 function createProvider(): AIProvider | null {
   const openRouterKey = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY?.trim();
-  if (openRouterKey) {
-    return new OpenRouterProvider(openRouterKey);
-  }
-  return null;
+  console.log('[AI] createProvider — OpenRouter key present =', !!openRouterKey);
+  console.log('[NETDBG] OpenRouter key =', maskKey(openRouterKey));
+  const provider = openRouterKey ? new OpenRouterProvider(openRouterKey) : null;
+  console.log('[NETDBG] provider created =', !!provider);
+  return provider;
 }
 
 class AIServiceImpl {
   private provider: AIProvider | null = null;
   private config: AIServiceConfig | null = null;
   private conversationHistory: AIMessage[] = [];
+  private toolBridge: AIToolBridge | null = null;
+  // Tools are OFF by default → current chat behaviour is byte-for-byte preserved.
+  // Set EXPO_PUBLIC_TOOLS_ENABLED=true (with a tool-capable model) to activate.
+  private toolsEnabled = process.env.EXPO_PUBLIC_TOOLS_ENABLED === 'true';
+
+  /** Inject the tool system without coupling AIService to any concrete tool. */
+  configureTools(bridge: AIToolBridge): void {
+    this.toolBridge = bridge;
+  }
 
   /**
-   * NOTE: `config.apiKey` (passed by useConversation from EXPO_PUBLIC_GEMINI_API_KEY)
-   * is intentionally no longer used as the network credential. The active provider
-   * reads its own key (OpenRouter → EXPO_PUBLIC_OPENROUTER_API_KEY). The Gemini var
-   * now only acts as the existing init trigger in the hook — left untouched.
+   * Initialize the AI service. Depends ONLY on OpenRouter — the active provider
+   * reads EXPO_PUBLIC_OPENROUTER_API_KEY itself. Safe to call with no config.
    */
-  initialize(config: AIServiceConfig): void {
-    this.config = config;
+  initialize(config?: AIServiceConfig): void {
+    console.log('[NETDBG] AIService.initialize() entered');
+    this.config = config ?? null;
     this.conversationHistory = [];
     this.provider = createProvider();
+    console.log(
+      '[AI] initialize — provider =',
+      this.provider ? this.provider.name : 'null',
+      '| isInitialized =',
+      this.isInitialized()
+    );
     if (!this.provider) {
       console.warn(
-        '[AIService] No EXPO_PUBLIC_OPENROUTER_API_KEY set — AI replies disabled. ' +
+        '[AI] No EXPO_PUBLIC_OPENROUTER_API_KEY set — AI replies disabled. ' +
           'Add an OpenRouter key (sk-or-…) to .env and restart Metro.'
       );
     }
@@ -184,7 +222,9 @@ class AIServiceImpl {
   }
 
   async generate(prompt: string, options?: AIGenerationOptions): Promise<AIGenerationResult> {
+    console.log('[NETDBG] AIService.generate() entered');
     if (!this.provider) {
+      console.error('[NETDBG] ❌ generate() aborted — provider is null (not initialized)');
       throw new Error('AIService not initialized (no AI provider configured).');
     }
 
@@ -202,6 +242,12 @@ class AIServiceImpl {
       maxTokens: this.config?.maxTokens ?? 1024,
       temperature: this.config?.temperature ?? 0.7,
     };
+
+    // Tool-calling path (opt-in via flag + feature-detected via provider.chat).
+    // Falls back to plain chat if the model rejects tools, so it's backward-safe.
+    if (this.toolsEnabled && this.toolBridge && this.provider.chat) {
+      return this.generateWithTools(messages, genConfig, reqId, t0);
+    }
 
     // Retry ONLY genuinely transient failures (rate-limit / 5xx / network). The
     // user message is added once above, so a retry never re-sends or duplicates it.
@@ -248,6 +294,78 @@ class AIServiceImpl {
     );
     this.addMessage('assistant', message);
     return { text: message, finishReason: 'error' };
+  }
+
+  /**
+   * Tool-calling loop. The model may request one or more tools per turn (executed
+   * in parallel by the bridge); results are fed back until it produces a final
+   * answer. Stays generic — no tool-specific logic lives here.
+   */
+  private async generateWithTools(
+    messages: ProviderMessage[],
+    genConfig: { model?: string; maxTokens?: number; temperature?: number },
+    reqId: number,
+    t0: number
+  ): Promise<AIGenerationResult> {
+    const provider = this.provider!;
+    const bridge = this.toolBridge!;
+    const ctx = { platform: Platform.OS };
+
+    let schemas: ToolSchema[] = [];
+    try {
+      schemas = await bridge.getSchemas(ctx);
+    } catch {
+      schemas = [];
+    }
+
+    const MAX_HOPS = 3;
+    const convo: ProviderMessage[] = [...messages];
+
+    for (let hop = 0; hop <= MAX_HOPS; hop++) {
+      let res: ProviderChatResult;
+      try {
+        res = await provider.chat!(convo, genConfig, schemas);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        // The model may not support tools → fall back to plain chat (backward-safe).
+        if (/tool|function|\b400\b/i.test(msg)) {
+          console.log(`[REQDBG] tools unsupported reqId=${reqId} — falling back to plain chat`);
+          try {
+            const text = await provider.generate(messages, genConfig);
+            this.addMessage('assistant', text);
+            return { text, finishReason: 'stop' };
+          } catch {
+            /* fall through to classification below */
+          }
+        }
+        const info = classifyProviderError(error);
+        const friendly = friendlyMessageForKind(info.kind);
+        this.addMessage('assistant', friendly);
+        return { text: friendly, finishReason: 'error' };
+      }
+
+      if (res.toolCalls && res.toolCalls.length > 0) {
+        console.log(`[REQDBG] tool hop=${hop} reqId=${reqId} calls=${res.toolCalls.map((c) => c.name).join(',')}`);
+        convo.push({ role: 'assistant', content: res.text ?? '', toolCalls: res.toolCalls });
+        let toolMsgs: ProviderMessage[] = [];
+        try {
+          toolMsgs = await bridge.execute(res.toolCalls, ctx);
+        } catch (e) {
+          console.log('[REQDBG] tool execution error:', e instanceof Error ? e.message : e);
+        }
+        convo.push(...toolMsgs);
+        continue;
+      }
+
+      const text = res.text ?? '';
+      console.log(`[REQDBG] generate() FINISHED (tools) reqId=${reqId} elapsedMs=${Date.now() - t0}`);
+      this.addMessage('assistant', text);
+      return { text, finishReason: 'stop' };
+    }
+
+    const exhausted = "I wasn't able to finish that — please try again.";
+    this.addMessage('assistant', exhausted);
+    return { text: exhausted, finishReason: 'error' };
   }
 
   async generateStream(prompt: string, options?: AIGenerationOptions): Promise<ReadableStream<string>> {

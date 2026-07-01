@@ -143,6 +143,7 @@ function maskKey(k?: string): string {
 
 function createProvider(): AIProvider | null {
   const openRouterKey = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY?.trim();
+  console.log('[EVIDENCE] OpenRouter key exists =', !!openRouterKey);
   console.log('[AI] createProvider — OpenRouter key present =', !!openRouterKey);
   console.log('[NETDBG] OpenRouter key =', maskKey(openRouterKey));
   const provider = openRouterKey ? new OpenRouterProvider(openRouterKey) : null;
@@ -169,10 +170,12 @@ class AIServiceImpl {
    * reads EXPO_PUBLIC_OPENROUTER_API_KEY itself. Safe to call with no config.
    */
   initialize(config?: AIServiceConfig): void {
+    console.log('[EVIDENCE] initialize() entered');
     console.log('[NETDBG] AIService.initialize() entered');
     this.config = config ?? null;
     this.conversationHistory = [];
     this.provider = createProvider();
+    console.log('[EVIDENCE] provider/dependency created =', this.provider !== null);
     console.log(
       '[AI] initialize — provider =',
       this.provider ? this.provider.name : 'null',
@@ -185,6 +188,7 @@ class AIServiceImpl {
           'Add an OpenRouter key (sk-or-…) to .env and restart Metro.'
       );
     }
+    console.log('[EVIDENCE] initialize() returned | isInitialized =', this.isInitialized());
   }
 
   startNewChat(): void {

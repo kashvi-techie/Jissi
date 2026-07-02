@@ -121,17 +121,12 @@ export function useConversation(): UseConversationResult {
    */
   const processInput = useCallback(
     async (input: string, intent?: IntentResult | null): Promise<void> => {
-      // TEMP (Phase 2.3) correlation id for this user message across the pipeline.
-      const reqId = `pi_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      console.log('[FLOWDBG 5] processInput entry. input=', JSON.stringify(input), 'intent=', intent?.intent);
-      console.log(`[REQDBG] processInput ENTER reqId=${reqId} ts=${Date.now()}`);
       if (!input || input.trim().length === 0) return;
 
       // Single-flight: ignore new input while a request is already in flight.
       // With the hand-off's transcript de-dupe (index.tsx prevTranscriptRef) this
       // guarantees exactly one AI/action request per user utterance.
       if (isProcessingRef.current) {
-        console.log(`[REQDBG] processInput IGNORED reqId=${reqId} — a request is already in flight`);
         return;
       }
       isProcessingRef.current = true;
@@ -191,7 +186,6 @@ export function useConversation(): UseConversationResult {
       setState('thinking');
       try {
         const result: AIGenerationResult = await AIService.generate(input);
-        console.log('[FLOWDBG 8b] generate returned. finishReason=', result.finishReason, 'textLen=', result.text ? result.text.length : 0);
 
         const assistantMessage = await ConversationRepository.addMessage({
           conversationId: currentConversation?.id || '',
@@ -200,7 +194,6 @@ export function useConversation(): UseConversationResult {
         });
         setMessages((prev) => [...prev, assistantMessage]);
         setLastResponse(result.text);
-        console.log('[FLOWDBG 9] assistant message created. id=', assistantMessage.id);
 
         await TTSService.speak(result.text);
       } catch (err) {
@@ -218,7 +211,6 @@ export function useConversation(): UseConversationResult {
       }
       } finally {
         isProcessingRef.current = false;
-        console.log(`[REQDBG] processInput EXIT reqId=${reqId} ts=${Date.now()}`);
       }
     },
     [currentConversation]

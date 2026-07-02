@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
 import { TTSState, TTSServiceConfig, TTSOptions, DEFAULT_TTS_CONFIG } from './types';
+import { sanitizeForSpeech } from './sanitizeForSpeech';
 
 class TTSServiceImpl {
   private config: TTSServiceConfig = DEFAULT_TTS_CONFIG;
@@ -8,6 +9,11 @@ class TTSServiceImpl {
   private stateListeners: Set<(state: TTSState) => void> = new Set();
   private currentText: string = '';
   private isAvailable: boolean = true;
+
+  /** Conversational voice defaults — a touch slower and slightly brighter reads
+   *  warmer / less robotic than a flat 1.0 / 1.0. */
+  private static readonly NATURAL_RATE = 0.98;
+  private static readonly NATURAL_PITCH = 1.05;
 
   configure(config: Partial<TTSServiceConfig>): void {
     this.config = { ...this.config, ...config };
@@ -36,12 +42,16 @@ class TTSServiceImpl {
   }
 
   async speak(text: string, options?: TTSOptions): Promise<void> {
-    console.log('[FLOWDBG 10] TTSService.speak. textLen=', text ? text.length : 0);
     if (!text || text.trim().length === 0) {
       return;
     }
 
     this.currentText = text;
+
+    // Speak a cleaned copy (markdown/symbols/emoji removed) so they aren't read
+    // aloud. The original text stays in currentText for the UI.
+    const spoken = this.normalizeForSpeech(sanitizeForSpeech(text));
+    if (!spoken) return;
 
     if (this.currentState === 'speaking') {
       await this.stop();
@@ -56,34 +66,62 @@ class TTSServiceImpl {
       typeof window !== 'undefined' &&
       'speechSynthesis' in window
     ) {
-      return this.speakWeb(text, options);
+      return this.speakWeb(spoken, options);
     }
 
-    this.setState('speaking');
-    options?.onStart?.();
+    // expo-speech's Speech.speak() is fire-and-forget (returns void) — awaiting it
+    // resolves IMMEDIATELY, not when speech ends. So we wrap it and resolve only on
+    // the onDone/onError callback (with a safety timeout). This keeps speak() from
+    // returning early, so the conversation loop won't re-open the mic mid-reply and
+    // let Android's recognizer steal audio focus and cut off the TTS.
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      let safety: ReturnType<typeof setTimeout> | null = null;
+      const finish = (errored: boolean, errMsg?: string) => {
+        if (settled) return;
+        settled = true;
+        if (safety) clearTimeout(safety);
+        this.setState(errored ? 'error' : 'idle');
+        if (errored) options?.onError?.(errMsg ?? 'TTS error');
+        else options?.onDone?.();
+        resolve();
+      };
 
-    try {
-      await Speech.speak(text, {
-        language: options?.voice ? undefined : this.config.language,
-        rate: options?.rate ?? this.config.rate ?? 1.0,
-        pitch: options?.pitch ?? this.config.pitch ?? 1.0,
-        voice: options?.voice ?? this.config.voice,
-        onStart: () => {
-          this.setState('speaking');
-        },
-        onDone: () => {
-          this.setState('idle');
-          options?.onDone?.();
-        },
-        onError: (error: any) => {
-          this.setState('error');
-          options?.onError?.(String(error));
-        },
-      });
-    } catch (error) {
-      this.setState('error');
-      options?.onError?.(error instanceof Error ? error.message : 'Unknown TTS error');
-    }
+      this.setState('speaking');
+      options?.onStart?.();
+
+      try {
+        Speech.speak(spoken, {
+          language: options?.voice ? undefined : this.config.language,
+          rate: options?.rate ?? this.config.rate ?? TTSServiceImpl.NATURAL_RATE,
+          pitch: options?.pitch ?? this.config.pitch ?? TTSServiceImpl.NATURAL_PITCH,
+          voice: options?.voice ?? this.config.voice,
+          onStart: () => this.setState('speaking'),
+          onDone: () => finish(false),
+          onError: (error: any) => finish(true, String(error)),
+        });
+      } catch (error) {
+        finish(true, error instanceof Error ? error.message : 'Unknown TTS error');
+        return;
+      }
+
+      // Safety net: if the native done/error event never fires, resolve anyway so
+      // the caller's await (and the conversation loop) never hangs.
+      const ms = Math.min(60000, 2000 + spoken.length * 100);
+      safety = setTimeout(() => finish(false), ms);
+    });
+  }
+
+  /** Light punctuation normalization for smoother pacing — collapses shouting
+   *  ("!!!"→"!"), turns "..." into a single ellipsis pause, expands "&". Kept
+   *  conservative so decimals/abbreviations (3.14, e.g.) stay intact. */
+  private normalizeForSpeech(text: string): string {
+    return text
+      .replace(/\s*&\s*/g, ' and ')
+      .replace(/\.{3,}/g, '…')
+      .replace(/([!?])\1+/g, '$1')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
   }
 
   /** Cached browser voice (female, English) so we don't re-scan every utterance. */
@@ -97,17 +135,22 @@ class TTSServiceImpl {
     const en = all.filter((v) => /^en/i.test(v.lang));
     const pool = en.length ? en : all;
     const female =
-      /(female|zira|samantha|victoria|susan|karen|moira|tessa|fiona|serena|allison|ava|joanna|salli|kimberly|amy|emma|jenny|aria|libby|sonia|google us english|google uk english female)/i;
+      /(female|zira|samantha|victoria|susan|karen|moira|tessa|fiona|serena|allison|ava|joanna|salli|kimberly|amy|emma|jenny|aria|libby|sonia|natasha|clara|google us english)/i;
+    // Neural/online voices (Google, Microsoft "… Online (Natural)") sound far
+    // less robotic and carry real intonation — prefer a female one of those.
+    const natural = (v: SpeechSynthesisVoice) => /google|natural|online|neural/i.test(v.name);
     this.webVoice =
+      pool.find((v) => natural(v) && female.test(v.name)) ||
       pool.find((v) => female.test(v.name)) ||
-      pool.find((v) => /google us english/i.test(v.name)) ||
+      pool.find((v) => natural(v)) ||
       pool[0] ||
       null;
     return this.webVoice;
   }
 
-  /** Speak via the browser's native SpeechSynthesis (web only). Resolves when the
-   *  utterance ends, errors, or a length-scaled safety timeout fires — so the
+  /** Speak via the browser's native SpeechSynthesis (web only). Speaks the whole
+   *  reply as ONE utterance (reliable across desktop + mobile browsers). Resolves
+   *  when it ends, errors, or a length-scaled safety timeout fires — so the
    *  caller's `await` never hangs even if the browser drops the end event. */
   private speakWeb(text: string, options?: TTSOptions): Promise<void> {
     return new Promise((resolve) => {
@@ -130,8 +173,8 @@ class TTSServiceImpl {
         synth.cancel(); // clear any stuck/queued utterance
         const u = new SpeechSynthesisUtterance(text);
         u.lang = this.config.language || 'en-US';
-        u.rate = options?.rate ?? this.config.rate ?? 1.0;
-        u.pitch = options?.pitch ?? this.config.pitch ?? 1.0;
+        u.rate = options?.rate ?? TTSServiceImpl.NATURAL_RATE;
+        u.pitch = options?.pitch ?? this.config.pitch ?? TTSServiceImpl.NATURAL_PITCH;
         const voice = this.pickWebVoice();
         if (voice) u.voice = voice;
 

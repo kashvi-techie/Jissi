@@ -169,7 +169,6 @@ export function useConversationMode(): UseConversationModeResult {
     ) {
       prevTranscriptRef.current = transcript;
       errorCountRef.current = 0;
-      console.log('[REQDBG] handoff (continuous) FIRED ts=', Date.now(), 'len=', transcript.length);
       // Close the mic during processing + TTS so the spoken reply can never be
       // captured as user speech.
       stopListening();

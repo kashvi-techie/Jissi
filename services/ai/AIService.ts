@@ -135,19 +135,10 @@ let aiRequestCounter = 0;
  * To add another backend later: implement AIProvider and return it here. Nothing
  * else in the app changes.
  */
-// [NETDBG] TEMPORARY: mask a secret for safe logging. Remove with the NETDBG logs.
-function maskKey(k?: string): string {
-  if (!k) return 'UNDEFINED/EMPTY';
-  return k.length <= 12 ? `***(len ${k.length})` : `${k.slice(0, 7)}********${k.slice(-4)} (len ${k.length})`;
-}
-
 function createProvider(): AIProvider | null {
   const openRouterKey = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY?.trim();
-  console.log('[EVIDENCE] OpenRouter key exists =', !!openRouterKey);
   console.log('[AI] createProvider — OpenRouter key present =', !!openRouterKey);
-  console.log('[NETDBG] OpenRouter key =', maskKey(openRouterKey));
   const provider = openRouterKey ? new OpenRouterProvider(openRouterKey) : null;
-  console.log('[NETDBG] provider created =', !!provider);
   return provider;
 }
 
@@ -170,12 +161,9 @@ class AIServiceImpl {
    * reads EXPO_PUBLIC_OPENROUTER_API_KEY itself. Safe to call with no config.
    */
   initialize(config?: AIServiceConfig): void {
-    console.log('[EVIDENCE] initialize() entered');
-    console.log('[NETDBG] AIService.initialize() entered');
     this.config = config ?? null;
     this.conversationHistory = [];
     this.provider = createProvider();
-    console.log('[EVIDENCE] provider/dependency created =', this.provider !== null);
     console.log(
       '[AI] initialize — provider =',
       this.provider ? this.provider.name : 'null',
@@ -188,7 +176,6 @@ class AIServiceImpl {
           'Add an OpenRouter key (sk-or-…) to .env and restart Metro.'
       );
     }
-    console.log('[EVIDENCE] initialize() returned | isInitialized =', this.isInitialized());
   }
 
   startNewChat(): void {
@@ -226,9 +213,7 @@ class AIServiceImpl {
   }
 
   async generate(prompt: string, options?: AIGenerationOptions): Promise<AIGenerationResult> {
-    console.log('[NETDBG] AIService.generate() entered');
     if (!this.provider) {
-      console.error('[NETDBG] ❌ generate() aborted — provider is null (not initialized)');
       throw new Error('AIService not initialized (no AI provider configured).');
     }
 
@@ -236,9 +221,6 @@ class AIServiceImpl {
 
     const reqId = ++aiRequestCounter;
     const t0 = Date.now();
-    console.log(
-      `[REQDBG] generate() CALLED reqId=${reqId} ts=${t0} provider=${this.provider.name} promptLen=${prompt.length}`
-    );
 
     const messages = this.buildMessages();
     const genConfig = {
@@ -262,11 +244,7 @@ class AIServiceImpl {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         sends++;
-        console.log(`[REQDBG] → ${this.provider.name} generate reqId=${reqId} attempt=${attempt + 1} send#=${sends} ts=${Date.now()}`);
         const text = await this.provider.generate(messages, genConfig);
-        console.log(
-          `[REQDBG] generate() FINISHED reqId=${reqId} ok=true sends=${sends} elapsedMs=${Date.now() - t0} textLen=${text ? text.length : 0}`
-        );
         this.addMessage('assistant', text);
         return {
           text,
@@ -276,14 +254,9 @@ class AIServiceImpl {
       } catch (error) {
         lastError = error;
         const info = classifyProviderError(error);
-        console.log(
-          `[REQDBG] AI ERROR reqId=${reqId} attempt=${attempt + 1} kind=${info.kind} status=${info.status ?? '?'} retryable=${info.retryable} detail="${info.detail}" ts=${Date.now()}`
-        );
-        console.log('[REQDBG] AI raw error:', safeStringify(error instanceof Error ? error.message : error));
         if (attempt < MAX_RETRIES && info.retryable) {
           const delay =
             info.retryDelayMs ?? Math.min(8000, 700 * Math.pow(2, attempt)) + Math.floor(Math.random() * 250);
-          console.log(`[REQDBG] retrying reqId=${reqId} in ${delay}ms (kind=${info.kind})`);
           await sleep(delay);
           continue;
         }
@@ -293,9 +266,6 @@ class AIServiceImpl {
 
     const info = classifyProviderError(lastError);
     const message = friendlyMessageForKind(info.kind);
-    console.log(
-      `[REQDBG] generate() FINISHED reqId=${reqId} ok=false sends=${sends} kind=${info.kind} elapsedMs=${Date.now() - t0}`
-    );
     this.addMessage('assistant', message);
     return { text: message, finishReason: 'error' };
   }
@@ -333,7 +303,6 @@ class AIServiceImpl {
         const msg = error instanceof Error ? error.message : String(error);
         // The model may not support tools → fall back to plain chat (backward-safe).
         if (/tool|function|\b400\b/i.test(msg)) {
-          console.log(`[REQDBG] tools unsupported reqId=${reqId} — falling back to plain chat`);
           try {
             const text = await provider.generate(messages, genConfig);
             this.addMessage('assistant', text);
@@ -349,20 +318,18 @@ class AIServiceImpl {
       }
 
       if (res.toolCalls && res.toolCalls.length > 0) {
-        console.log(`[REQDBG] tool hop=${hop} reqId=${reqId} calls=${res.toolCalls.map((c) => c.name).join(',')}`);
         convo.push({ role: 'assistant', content: res.text ?? '', toolCalls: res.toolCalls });
         let toolMsgs: ProviderMessage[] = [];
         try {
           toolMsgs = await bridge.execute(res.toolCalls, ctx);
-        } catch (e) {
-          console.log('[REQDBG] tool execution error:', e instanceof Error ? e.message : e);
+        } catch {
+          /* tool execution failed — continue with no tool results */
         }
         convo.push(...toolMsgs);
         continue;
       }
 
       const text = res.text ?? '';
-      console.log(`[REQDBG] generate() FINISHED (tools) reqId=${reqId} elapsedMs=${Date.now() - t0}`);
       this.addMessage('assistant', text);
       return { text, finishReason: 'stop' };
     }

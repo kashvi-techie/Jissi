@@ -109,7 +109,6 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
 
     await SpeechService.initialize({
       onSpeechStart: () => {
-        console.log('[FLOWDBG 1] SpeechService: recognition started');
         setState('listening');
         setIsListening(true);
         setError(null);
@@ -120,14 +119,11 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
       },
       onSpeechResults: (results: string[]) => {
         const finalChunk = results[0] || '';
-        console.log('[FLOWDBG 2] transcript chunk:', JSON.stringify(finalChunk));
-        console.log(`[REQDBG] transcript received (final chunk) ts=${Date.now()} chunkLen=${finalChunk.length}`);
         // Accumulate the final transcript and recompute the intent from the
         // full text. Functional update keeps this correct across re-renders.
         setTranscript((prev) => {
           const updated = prev ? `${prev} ${finalChunk}` : finalChunk;
           const intent = detectIntent(updated);
-          console.log('[FLOWDBG 3] intent detected:', intent.intent, 'query=', intent.query);
           setIntentResult(intent);
           return updated;
         });

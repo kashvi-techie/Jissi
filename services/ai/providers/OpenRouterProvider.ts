@@ -40,43 +40,16 @@ function safeParseArgs(raw: unknown): Record<string, unknown> {
 }
 
 /**
- * [EVIDENCE S3] Verbose diagnostics for ANY non-2xx OpenRouter response. Prints
- * everything we can read about the failure WITHOUT exposing the API key (the key
- * is sent only in the Authorization header, never in the request body). Logging
- * only — callers still throw exactly as before. Returns the raw body so the caller
- * can build its error message without re-reading the (already consumed) stream.
+ * Read a non-2xx response body exactly once and return it, so the caller can
+ * build its error message / parse a Retry-After without re-reading the
+ * (already consumed) stream.
  */
-async function dumpNon200(res: Response, requestBody: Record<string, unknown>): Promise<string> {
-  let rawBody = '';
+async function dumpNon200(res: Response, _requestBody: Record<string, unknown>): Promise<string> {
   try {
-    rawBody = await res.text();
+    return await res.text();
   } catch {
-    rawBody = '(failed to read response body)';
+    return '(failed to read response body)';
   }
-  let parsed: unknown = null;
-  try {
-    parsed = JSON.parse(rawBody);
-  } catch {
-    /* body was not JSON */
-  }
-  const headers: Record<string, string> = {};
-  res.headers.forEach((value, key) => {
-    headers[key] = value;
-  });
-  const errorObject =
-    parsed && typeof parsed === 'object' && 'error' in parsed
-      ? (parsed as { error: unknown }).error
-      : parsed;
-
-  console.log('═════════ [EVIDENCE S3] OpenRouter NON-200 RESPONSE ═════════');
-  console.log('[EVIDENCE S3] Status:', res.status, res.statusText);
-  console.log('[EVIDENCE S3] Headers:', JSON.stringify(headers, null, 2));
-  console.log('[EVIDENCE S3] Response body:', rawBody);
-  console.log('[EVIDENCE S3] OpenRouter error object:', JSON.stringify(errorObject, null, 2));
-  console.log('[EVIDENCE S3] Model used:', requestBody.model);
-  console.log('[EVIDENCE S3] Request body (excluding API key):', JSON.stringify(requestBody, null, 2));
-  console.log('═════════════════════════════════════════════════════════════');
-  return rawBody;
 }
 
 /**

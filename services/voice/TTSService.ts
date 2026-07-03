@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
 import { TTSState, TTSServiceConfig, TTSOptions, DEFAULT_TTS_CONFIG } from './types';
 import { sanitizeForSpeech } from './sanitizeForSpeech';
@@ -14,6 +15,21 @@ class TTSServiceImpl {
    *  warmer / less robotic than a flat 1.0 / 1.0. */
   private static readonly NATURAL_RATE = 0.98;
   private static readonly NATURAL_PITCH = 1.05;
+
+  private async prepareAudioForSpeech(): Promise<void> {
+    if (Platform.OS === 'web') return;
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: false,
+        playThroughEarpieceAndroid: false,
+        staysActiveInBackground: false,
+      });
+    } catch {
+      // Best-effort: TTS may still work even if audio mode cannot be changed.
+    }
+  }
 
   configure(config: Partial<TTSServiceConfig>): void {
     this.config = { ...this.config, ...config };
@@ -78,6 +94,7 @@ class TTSServiceImpl {
     if (this.currentState === 'speaking') {
       await this.stop();
     }
+    await this.prepareAudioForSpeech();
 
     // Web: expo-speech's web output is unreliable — utterances get silently
     // dropped (text replies show but no audio). Talk to the browser's

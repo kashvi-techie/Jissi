@@ -32,10 +32,11 @@ export interface TalkViewProps {
 export function TalkView({ orbState, voiceState, status, transcript, onMic, onStop, onBack, onMessage }: TalkViewProps) {
   const theme = useTheme();
   const { width } = useWindowDimensions();
-  const orbSize = Math.round(Math.min(width * 0.72, 360));
+  const orbSize = Math.round(Math.min(width * 0.58, 300));
 
   return (
     <View style={styles.root}>
+      <View pointerEvents="none" style={styles.ambientGlow} />
       {/* Top bar */}
       <View style={styles.topBar}>
         <PressableScale onPress={onBack} accessibilityRole="button" accessibilityLabel="Back">
@@ -66,29 +67,49 @@ export function TalkView({ orbState, voiceState, status, transcript, onMic, onSt
 
       {/* Dock: search · mic · close */}
       <View style={styles.dock}>
-        <CircleButton icon={Search} size={54} accessibilityLabel="Search" />
-        <VoiceButton state={voiceState} onPress={onMic} size={84} />
-        <CircleButton icon={X} size={54} onPress={onStop} accessibilityLabel="Stop" />
+        <CircleButton icon={Search} size={48} iconSize={18} accessibilityLabel="Search" />
+        <VoiceButton state={voiceState} onPress={onMic} size={62} />
+        <CircleButton icon={X} size={48} iconSize={18} onPress={onStop} accessibilityLabel="Stop" />
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { flex: 1, overflow: 'hidden' },
+  ambientGlow: {
+    position: 'absolute',
+    top: 74,
+    alignSelf: 'center',
+    width: 320,
+    height: 420,
+    borderRadius: 160,
+    backgroundColor: 'rgba(0,82,160,0.16)',
+    transform: [{ scaleX: 1.25 }],
+  },
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: Spacing.sm },
-  topBtn: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
-  status: { textAlign: 'center', marginTop: Spacing.xs },
+  topBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.035)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.07)',
+  },
+  status: { textAlign: 'center', marginTop: Spacing.sm },
 
-  body: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.xxxl },
+  body: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.xxl, paddingBottom: 26 },
   transcript: {
     textAlign: 'center',
     fontFamily: Fonts.bodyMedium,
-    fontSize: 24,
-    lineHeight: 33,
-    letterSpacing: -0.2,
-    paddingHorizontal: Spacing.md,
+    fontSize: 20,
+    lineHeight: 29,
+    letterSpacing: 0,
+    maxWidth: 320,
+    paddingHorizontal: Spacing.lg,
   },
 
-  dock: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.xxxl, paddingBottom: Spacing.xxxl, paddingTop: Spacing.lg },
+  dock: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.xxl, paddingBottom: Spacing.xxxl, paddingTop: Spacing.md },
 });

@@ -41,6 +41,28 @@ class TTSServiceImpl {
     return this.currentState;
   }
 
+  /** Prime the browser SpeechSynthesis from within a user gesture (web only).
+   *  Browsers block speech until the page has a user activation; the mic tap's
+   *  activation is consumed by mic-permission/recognition and has expired by the
+   *  time the reply is spoken (seconds later, after the async AI call) — so it is
+   *  silently dropped. Calling this ON the mic tap unlocks the engine for the
+   *  session and warms up async voice-list loading. No-op on native. */
+  unlockWeb(): void {
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      return;
+    }
+    try {
+      const synth = window.speechSynthesis;
+      synth.getVoices(); // kick off async voice-list loading
+      synth.resume();
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0; // inaudible — we only need the gesture to unlock the engine
+      synth.speak(u);
+    } catch {
+      // best-effort priming — ignore failures
+    }
+  }
+
   async speak(text: string, options?: TTSOptions): Promise<void> {
     if (!text || text.trim().length === 0) {
       return;
@@ -155,19 +177,15 @@ class TTSServiceImpl {
   private speakWeb(text: string, options?: TTSOptions): Promise<void> {
     return new Promise((resolve) => {
       const synth = window.speechSynthesis;
-
-      // Voices load asynchronously; if they aren't ready, wait once then retry.
-      if (!this.webVoice && synth.getVoices().length === 0) {
-        const retry = () => {
-          synth.onvoiceschanged = null;
-          this.speakWeb(text, options).then(resolve);
-        };
-        synth.onvoiceschanged = retry;
-        setTimeout(() => {
-          if (synth.onvoiceschanged) retry(); // some browsers never fire the event
-        }, 500);
-        return;
-      }
+      let settled = false;
+      const finish = (errored: boolean) => {
+        if (settled) return;
+        settled = true;
+        this.setState(errored ? 'error' : 'idle');
+        if (errored) options?.onError?.('TTS error');
+        else options?.onDone?.();
+        resolve();
+      };
 
       try {
         synth.cancel(); // clear any stuck/queued utterance
@@ -175,18 +193,11 @@ class TTSServiceImpl {
         u.lang = this.config.language || 'en-US';
         u.rate = options?.rate ?? TTSServiceImpl.NATURAL_RATE;
         u.pitch = options?.pitch ?? this.config.pitch ?? TTSServiceImpl.NATURAL_PITCH;
+        // Use a female/natural voice IF the list is ready; otherwise speak with the
+        // browser default. Never block on voice loading — that can deadlock and
+        // produce total silence.
         const voice = this.pickWebVoice();
         if (voice) u.voice = voice;
-
-        let settled = false;
-        const finish = (errored: boolean) => {
-          if (settled) return;
-          settled = true;
-          this.setState(errored ? 'error' : 'idle');
-          if (errored) options?.onError?.('TTS error');
-          else options?.onDone?.();
-          resolve();
-        };
 
         u.onstart = () => this.setState('speaking');
         u.onend = () => finish(false);
@@ -195,6 +206,8 @@ class TTSServiceImpl {
         this.setState('speaking');
         options?.onStart?.();
         synth.speak(u);
+        // Chrome sometimes starts synthesis paused — nudge it to actually play.
+        try { synth.resume(); } catch {}
 
         // Safety net for the known Chrome quirk where end/error never fire.
         const ms = Math.min(30000, 1500 + text.length * 90);

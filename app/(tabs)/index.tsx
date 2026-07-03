@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { CalendarClock, Languages, MessageCircle, Sparkles } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { SpeechState } from '@/services/speech/types';
+import { TTSService } from '@/services/voice';
 import { AssistantState } from '@/hooks/useConversation';
 import { useConversationMode } from '@/hooks/useConversationMode';
 import { OrbState } from '@/components/orb/PlasmaOrb';
@@ -160,6 +161,7 @@ export default function HomeScreen() {
           status={statusShort(phase, isSupported)}
           transcript={voiceTranscript}
           onMic={() => {
+            TTSService.unlockWeb(); // unlock web speech synthesis inside the user gesture
             if (isSupported) toggle();
           }}
           onStop={stop}
@@ -176,7 +178,10 @@ export default function HomeScreen() {
           voiceState={phaseToVoice(phase, isSupported)}
           status={statusShort(phase, isSupported)}
           transcript={voiceTranscript}
-          onMic={toggle}
+          onMic={() => {
+            TTSService.unlockWeb();
+            toggle();
+          }}
           onStop={stop}
           onBack={closeTalk}
           onMessage={goHistory}

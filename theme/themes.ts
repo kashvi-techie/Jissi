@@ -93,10 +93,10 @@ export const darkTheme: Theme = {
     error: '#FF6B6B',
   },
   gradients: {
-    background: ['#101014', '#0A0A0D', '#070708'],
-    orbCore: ['#CFE3FF', '#6E7BFF', '#3A1A5E'],
-    orbHalo: 'rgba(124,124,255,0.30)',
-    accent: ['#7C8CFF', '#9B6CFF'],
+    background: ['#071C2D', '#020711', '#000207'],
+    orbCore: ['#F8F0FF', '#168CFF', '#75184E'],
+    orbHalo: 'rgba(22,140,255,0.32)',
+    accent: ['#168CFF', '#C34CFF'],
     bubbleUser: ['#7C8CFF', '#9B6CFF'],
   },
   glass: {

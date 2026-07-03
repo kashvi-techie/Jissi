@@ -1,4 +1,5 @@
 import { Platform, AppState, AppStateStatus } from 'react-native';
+import { Audio } from 'expo-av';
 import type {
   ExpoSpeechRecognitionResultEvent,
   ExpoSpeechRecognitionErrorEvent,
@@ -77,6 +78,20 @@ class SpeechServiceImpl {
   private nativeAvailable = ExpoSpeechRecognition != null;
   private subscriptions: EventSub[] = [];
   private appStateSub: EventSub | null = null;
+
+  private async prepareAudioForRecognition(): Promise<void> {
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+        staysActiveInBackground: false,
+      });
+    } catch {
+      // Audio mode is best-effort; recognition permission/support checks still decide.
+    }
+  }
 
   async initialize(callbacks: SpeechRecognitionCallbacks): Promise<void> {
     this.callbacks = callbacks;
@@ -240,6 +255,8 @@ class SpeechServiceImpl {
     this.isListening = true;
 
     try {
+      await this.prepareAudioForRecognition();
+
       if (Platform.OS === 'web') {
         try {
           this.webRecognition?.start();

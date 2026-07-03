@@ -52,6 +52,22 @@ async function dumpNon200(res: Response, _requestBody: Record<string, unknown>):
   }
 }
 
+function headersToObject(headers: Headers): Record<string, string> {
+  const out: Record<string, string> = {};
+  headers.forEach((value, key) => {
+    out[key] = value;
+  });
+  return out;
+}
+
+function debugPayload(payload: Record<string, unknown>): string {
+  try {
+    return JSON.stringify(payload, null, 2);
+  } catch {
+    return String(payload);
+  }
+}
+
 /**
  * Ordered list of capable FREE models. The provider walks this list on every
  * request and uses the first one that answers — so a single model being
@@ -175,6 +191,10 @@ export class OpenRouterProvider implements AIProvider {
       body.tool_choice = 'auto';
     }
 
+    console.log('[OpenRouter DEBUG] Request model:', model);
+    console.log('[OpenRouter DEBUG] Request URL:', OPENROUTER_URL);
+    console.log('[OpenRouter DEBUG] Request payload (no API key):', debugPayload(body));
+
     const res = await fetch(OPENROUTER_URL, {
       method: 'POST',
       headers: {
@@ -186,8 +206,12 @@ export class OpenRouterProvider implements AIProvider {
       body: JSON.stringify(body),
     });
 
+    console.log('[OpenRouter DEBUG] HTTP status:', res.status);
+    console.log('[OpenRouter DEBUG] Response headers:', debugPayload(headersToObject(res.headers)));
+
     if (!res.ok) {
       const rawBody = await dumpNon200(res, body);
+      console.log('[OpenRouter DEBUG] Complete response body:', rawBody);
       const error: ProviderRequestError = new Error(
         `OpenRouter ${res.status}: ${rawBody.slice(0, 600)}`
       );

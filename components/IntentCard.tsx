@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, View, Text } from 'react-native';
 import { BlurView } from 'expo-blur';
-import { Youtube, Chrome, MessageCircle, Search, Sparkles, HelpCircle } from 'lucide-react-native';
+import { Youtube, Chrome, MessageCircle, Search, Sparkles, HelpCircle, UserRound } from 'lucide-react-native';
 import { IntentResult, IntentType } from '@/engine/intentEngine';
 import { Colors } from '@/constants/colors';
 import { Spacing, Radius } from '@/constants/theme';
@@ -11,6 +11,7 @@ interface IntentCardProps {
 }
 
 const META: Record<IntentType, { label: string; icon: any; color: string }> = {
+  social_greeting: { label: 'Social Greeting', icon: UserRound, color: Colors.intent.ask },
   open_youtube: { label: 'Open YouTube', icon: Youtube, color: Colors.intent.youtube },
   open_chrome: { label: 'Open Chrome', icon: Chrome, color: Colors.intent.chrome },
   open_whatsapp: { label: 'Open WhatsApp', icon: MessageCircle, color: Colors.intent.whatsapp },

@@ -23,6 +23,7 @@
 
 /** All intents JISSI can recognize. Extend this union to add commands. */
 export type IntentType =
+  | 'social_greeting'
   | 'open_youtube'
   | 'open_chrome'
   | 'open_whatsapp'
@@ -37,6 +38,12 @@ export interface IntentResult {
   confidence: IntentConfidence;
   /** Optional extracted argument (e.g. the search terms for `search_google`). */
   query?: string;
+  /** Optional structured arguments for richer local capabilities. */
+  entities?: {
+    relationship?: string;
+    name?: string;
+    gender?: string;
+  };
 }
 
 /** A single classification rule in the registry. */
@@ -46,6 +53,102 @@ export interface IntentRule {
   patterns: RegExp[];
   /** Optional argument extractor (e.g. pull the search query out of the text). */
   extractQuery?: (text: string) => string | undefined;
+  /** Optional structured argument extractor for local capabilities. */
+  extractEntities?: (text: string) => IntentResult['entities'];
+}
+
+const RELATIONSHIP_ALIASES: Record<string, string> = {
+  teacher: 'teacher',
+  professor: 'teacher',
+  sir: 'teacher',
+  maam: 'teacher',
+  mam: 'teacher',
+  mentor: 'mentor',
+  guide: 'mentor',
+  friend: 'friend',
+  buddy: 'friend',
+  mother: 'mother',
+  mom: 'mother',
+  mummy: 'mother',
+  maa: 'mother',
+  father: 'father',
+  dad: 'father',
+  papa: 'father',
+  sibling: 'sibling',
+  brother: 'sibling',
+  sister: 'sibling',
+  recruiter: 'recruiter',
+  interviewer: 'interviewer',
+  guest: 'guest',
+  colleague: 'colleague',
+  coworker: 'colleague',
+  senior: 'senior',
+};
+
+function normalizeRelationship(value?: string): string | undefined {
+  if (!value) return undefined;
+  const key = value.toLowerCase().replace(/[.'’]/g, '').trim();
+  return RELATIONSHIP_ALIASES[key];
+}
+
+function titleCaseName(name?: string): string | undefined {
+  if (!name) return undefined;
+  const cleaned = name
+    .replace(/\b(my|the|a|an|is|here|standing|beside|with|me|please|greet|meet|this)\b/gi, ' ')
+    .replace(/[,.!?]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned || cleaned.length < 2) return undefined;
+  return cleaned
+    .split(' ')
+    .slice(0, 4)
+    .map((part) => {
+      const lower = part.toLowerCase();
+      if (['sir', 'mam', 'maam', 'ma’am', 'mr', 'mrs', 'ms', 'dr'].includes(lower)) {
+        return lower === 'maam' ? 'maam' : part;
+      }
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(' ');
+}
+
+function inferGender(text: string, relationship?: string, name?: string): string | undefined {
+  const source = `${text} ${name ?? ''}`.toLowerCase();
+  if (/\b(he|him|his|sir|mr|father|dad|papa|brother)\b/.test(source)) return 'male';
+  if (/\b(she|her|mam|maam|ma’am|mrs|ms|mother|mom|mummy|maa|sister)\b/.test(source)) return 'female';
+  if (relationship === 'mother') return 'female';
+  if (relationship === 'father') return 'male';
+  return undefined;
+}
+
+function extractSocialGreetingEntities(text: string): IntentResult['entities'] {
+  const normalized = text.trim();
+  const relPattern = Object.keys(RELATIONSHIP_ALIASES).join('|');
+
+  const relationshipMatch = normalized.match(new RegExp(`\\b(${relPattern})\\b`, 'i'));
+  const relationship = normalizeRelationship(relationshipMatch?.[1]);
+
+  const namePatterns = [
+    new RegExp(`\\b(?:this is|meet|here'?s|here is|introducing)\\s+([a-z][a-z.'’]*(?:\\s+[a-z][a-z.'’]*){0,3})\\s*,?\\s*(?:my\\s+)?(?:${relPattern})\\b`, 'i'),
+    new RegExp(`\\b(?:my\\s+)?(?:${relPattern})\\s+([a-z][a-z.'’]*(?:\\s+[a-z][a-z.'’]*){0,3})\\s+(?:is\\s+)?(?:here|with|standing|beside)\\b`, 'i'),
+    new RegExp(`\\b(?:please\\s+)?greet\\s+(?:my\\s+)?(?:${relPattern})\\s*,?\\s*([a-z][a-z.'’]*(?:\\s+[a-z][a-z.'’]*){0,3})?`, 'i'),
+  ];
+
+  let name: string | undefined;
+  for (const pattern of namePatterns) {
+    const match = normalized.match(pattern);
+    if (match?.[1]) {
+      name = titleCaseName(match[1]);
+      break;
+    }
+  }
+
+  return {
+    relationship,
+    name,
+    gender: inferGender(normalized, relationship, name),
+  };
 }
 
 /**
@@ -53,6 +156,19 @@ export interface IntentRule {
  * Evaluated in order; the first matching rule wins.
  */
 export const INTENT_RULES: IntentRule[] = [
+  {
+    intent: 'social_greeting',
+    patterns: [
+      /\b(this is|meet|greet|introducing|here'?s|here is)\s+(my\s+)?(teacher|professor|mentor|guide|friend|buddy|mother|mom|mummy|maa|father|dad|papa|sibling|brother|sister|recruiter|interviewer|guest|colleague|coworker|senior)\b/i,
+      /\b(my\s+)?(teacher|professor|mentor|guide|friend|buddy|mother|mom|mummy|maa|father|dad|papa|sibling|brother|sister|recruiter|interviewer|guest|colleague|coworker|senior)\s+(is\s+)?(here|with me|standing beside me|beside me)\b/i,
+      /\b(this is|meet|here'?s|here is|introducing)\s+[a-z][a-z.'’]*(?:\s+[a-z][a-z.'’]*){0,3}\s*,?\s*(my\s+)?(teacher|professor|mentor|guide|friend|buddy|mother|mom|mummy|maa|father|dad|papa|sibling|brother|sister|recruiter|interviewer|guest|colleague|coworker|senior)\b/i,
+      /\b(this is|meet|here'?s|here is|introducing)\s+[a-z][a-z.'’]*(?:\s+[a-z][a-z.'’]*){0,2}\s+(sir|mam|maam|ma’am)\b/i,
+      /\b(regarding|for|as)\s+(my\s+)?(teacher|professor|mentor|guide|friend|buddy|mother|mom|mummy|maa|father|dad|papa|sibling|brother|sister|recruiter|interviewer|guest|colleague|coworker|senior)\b.*\b(this is|meet|here'?s|here is|introducing)\s+[a-z][a-z.'’]*(?:\s+[a-z][a-z.'’]*){0,3}\b/i,
+      /\bplease\s+greet\s+(my\s+)?(teacher|professor|mentor|guide|friend|buddy|mother|mom|mummy|maa|father|dad|papa|sibling|brother|sister|recruiter|interviewer|guest|colleague|coworker|senior)\b/i,
+    ],
+    extractQuery: (text) => text.trim(),
+    extractEntities: extractSocialGreetingEntities,
+  },
   {
     intent: 'open_youtube',
     patterns: [/\b(open|launch|start|go\s+to|show)\s+youtube\b/i, /\byoutube\b/i],
@@ -99,6 +215,7 @@ export function detectIntent(rawText: string): IntentResult {
         intent: rule.intent,
         confidence: 'high',
         query: rule.extractQuery ? rule.extractQuery(text) : undefined,
+        entities: rule.extractEntities ? rule.extractEntities(text) : undefined,
       };
     }
   }

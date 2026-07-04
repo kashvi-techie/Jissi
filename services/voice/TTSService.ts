@@ -16,6 +16,10 @@ class TTSServiceImpl {
   private static readonly NATURAL_RATE = 0.98;
   private static readonly NATURAL_PITCH = 1.05;
 
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   private async prepareAudioForSpeech(): Promise<void> {
     if (Platform.OS === 'web') return;
     try {
@@ -94,7 +98,17 @@ class TTSServiceImpl {
     if (this.currentState === 'speaking') {
       await this.stop();
     }
+    if (Platform.OS !== 'web') {
+      try {
+        await Speech.stop();
+      } catch {
+        // Ignore stale native TTS cleanup failures.
+      }
+    }
     await this.prepareAudioForSpeech();
+    if (Platform.OS === 'android') {
+      await this.sleep(180);
+    }
 
     // Web: expo-speech's web output is unreliable — utterances get silently
     // dropped (text replies show but no audio). Talk to the browser's

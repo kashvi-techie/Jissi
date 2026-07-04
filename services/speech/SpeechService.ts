@@ -78,6 +78,13 @@ class SpeechServiceImpl {
   private nativeAvailable = ExpoSpeechRecognition != null;
   private subscriptions: EventSub[] = [];
   private appStateSub: EventSub | null = null;
+  private stopWaiter: (() => void) | null = null;
+
+  private resolveStopWaiter(): void {
+    const resolve = this.stopWaiter;
+    this.stopWaiter = null;
+    resolve?.();
+  }
 
   private async prepareAudioForRecognition(): Promise<void> {
     try {
@@ -183,6 +190,7 @@ class SpeechServiceImpl {
     });
     add<null>('end', () => {
       this.isListening = false;
+      this.resolveStopWaiter();
       this.callbacks.onSpeechEnd?.();
     });
     add<ExpoSpeechRecognitionResultEvent>('result', (ev) => {
@@ -196,6 +204,7 @@ class SpeechServiceImpl {
     });
     add<ExpoSpeechRecognitionErrorEvent>('error', (ev) => {
       this.isListening = false;
+      this.resolveStopWaiter();
       this.callbacks.onSpeechError?.(ev.message || ev.error || 'Unknown speech error');
     });
     add<{ value: number }>('volumechange', (ev) => {
@@ -296,10 +305,20 @@ class SpeechServiceImpl {
       if (Platform.OS === 'web') {
         this.webRecognition?.stop();
       } else if (this.nativeAvailable && ExpoSpeechRecognition) {
+        const endEvent = new Promise<void>((resolve) => {
+          this.stopWaiter = resolve;
+          setTimeout(() => {
+            if (this.stopWaiter === resolve) {
+              this.resolveStopWaiter();
+            }
+          }, 900);
+        });
         ExpoSpeechRecognition.stop();
+        await endEvent;
       }
       this.isListening = false;
     } catch (error) {
+      this.resolveStopWaiter();
       const message = error instanceof Error ? error.message : 'Failed to stop listening';
       this.callbacks.onSpeechError?.(message);
     }
@@ -313,6 +332,7 @@ class SpeechServiceImpl {
         ExpoSpeechRecognition.abort();
       }
       this.isListening = false;
+      this.resolveStopWaiter();
     } catch {
       // Silent fail on cancel
     }

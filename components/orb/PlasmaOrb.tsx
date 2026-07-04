@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
-import Svg, { Circle, Defs, Ellipse, RadialGradient, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, Ellipse, G, LinearGradient, RadialGradient, Stop } from 'react-native-svg';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -16,180 +16,112 @@ export type OrbState = 'idle' | 'listening' | 'thinking' | 'speaking';
 
 interface PlasmaOrbProps {
   state?: OrbState;
-  /** Sphere diameter in px. */
   size?: number;
 }
 
-/** Per-state animation parameters. */
-const CONFIG: Record<
-  OrbState,
-  { breath: number; scaleAmt: number; rot: number; flick: number; coreMax: number; rings: boolean }
-> = {
-  idle: { breath: 7200, scaleAmt: 0.022, rot: 48000, flick: 6000, coreMax: 0.42, rings: false },
-  listening: { breath: 3600, scaleAmt: 0.04, rot: 34000, flick: 4200, coreMax: 0.6, rings: true },
-  thinking: { breath: 4600, scaleAmt: 0.03, rot: 30000, flick: 3800, coreMax: 0.52, rings: false },
-  speaking: { breath: 2600, scaleAmt: 0.045, rot: 26000, flick: 3000, coreMax: 0.68, rings: true },
+const CONFIG: Record<OrbState, { breath: number; scaleAmt: number; rot: number; glow: number }> = {
+  idle: { breath: 7200, scaleAmt: 0.02, rot: 52000, glow: 0.42 },
+  listening: { breath: 3400, scaleAmt: 0.034, rot: 34000, glow: 0.72 },
+  thinking: { breath: 4800, scaleAmt: 0.026, rot: 42000, glow: 0.58 },
+  speaking: { breath: 2500, scaleAmt: 0.04, rot: 28000, glow: 0.82 },
 };
 
-const VB = 220; // SVG authoring space — viewBox scales everything to `size`
+const VB = 240;
 const C = VB / 2;
 
-export function PlasmaOrb({ state = 'idle', size = 200 }: PlasmaOrbProps) {
+export function PlasmaOrb({ state = 'idle', size = 220 }: PlasmaOrbProps) {
   const theme = useTheme();
-  const [core0, core1, core2] = theme.gradients.orbCore;
-
-  // progress shared values (0..1 loops)
+  const [hot, mid, deep] = theme.gradients.orbCore;
   const breath = useSharedValue(0);
-  const rot = useSharedValue(0);
-  const flick = useSharedValue(0);
-  const corePulse = useSharedValue(0);
-  const ring = useSharedValue(0);
+  const rotate = useSharedValue(0);
+  const flow = useSharedValue(0);
   const float = useSharedValue(0);
 
-  // per-state scalars read inside worklets
-  const scaleAmt = useSharedValue(CONFIG.idle.scaleAmt);
-  const coreMax = useSharedValue(CONFIG.idle.coreMax);
-
-  // constant float loop
   useEffect(() => {
-    float.value = withRepeat(withTiming(1, { duration: 5200, easing: Easing.inOut(Easing.ease) }), -1, true);
+    const cfg = CONFIG[state];
+    breath.value = 0;
+    rotate.value = 0;
+    flow.value = 0;
+    breath.value = withRepeat(withTiming(1, { duration: cfg.breath, easing: Easing.inOut(Easing.ease) }), -1, true);
+    rotate.value = withRepeat(withTiming(1, { duration: cfg.rot, easing: Easing.linear }), -1, false);
+    flow.value = withRepeat(withTiming(1, { duration: Math.max(2800, cfg.rot * 0.22), easing: Easing.inOut(Easing.ease) }), -1, true);
+    return () => {
+      cancelAnimation(breath);
+      cancelAnimation(rotate);
+      cancelAnimation(flow);
+    };
+  }, [state, breath, rotate, flow]);
+
+  useEffect(() => {
+    float.value = withRepeat(withTiming(1, { duration: 9000, easing: Easing.inOut(Easing.ease) }), -1, true);
     return () => cancelAnimation(float);
   }, [float]);
 
-  // re-target all loops whenever the state changes
-  useEffect(() => {
-    const cfg = CONFIG[state];
-    scaleAmt.value = cfg.scaleAmt;
-    coreMax.value = cfg.coreMax;
-
-    breath.value = 0;
-    breath.value = withRepeat(withTiming(1, { duration: cfg.breath, easing: Easing.inOut(Easing.ease) }), -1, true);
-    rot.value = 0;
-    rot.value = withRepeat(withTiming(1, { duration: cfg.rot, easing: Easing.linear }), -1, false);
-    flick.value = withRepeat(withTiming(1, { duration: cfg.flick, easing: Easing.inOut(Easing.ease) }), -1, true);
-    corePulse.value = withRepeat(withTiming(1, { duration: cfg.breath, easing: Easing.inOut(Easing.ease) }), -1, true);
-    ring.value = 0;
-    if (cfg.rings) {
-      ring.value = withRepeat(withTiming(1, { duration: 3600, easing: Easing.out(Easing.ease) }), -1, false);
-    }
-    return () => {
-      cancelAnimation(breath);
-      cancelAnimation(rot);
-      cancelAnimation(flick);
-      cancelAnimation(corePulse);
-      cancelAnimation(ring);
-    };
-  }, [state, breath, rot, flick, corePulse, ring, scaleAmt, coreMax]);
-
   const floatStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: interpolate(float.value, [0, 1], [7, -7]) }],
+    transform: [{ translateY: interpolate(float.value, [0, 1], [3, -3]) }],
   }));
-  const breatheStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 + breath.value * scaleAmt.value }],
-  }));
-  const haloStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(corePulse.value, [0, 1], [0.45, 0.85]),
-    transform: [{ scale: interpolate(breath.value, [0, 1], [1, 1.08]) }],
-  }));
-  const rotateStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rot.value * 360}deg` }],
-  }));
-  const flickerStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(flick.value, [0, 1], [0.35, 0.92]),
-  }));
-  const coreStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(corePulse.value, [0, 1], [0.3, coreMax.value]),
-    transform: [{ scale: interpolate(corePulse.value, [0, 1], [0.92, 1.08]) }],
-  }));
-  const ringStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(ring.value, [0, 1], [0.28, 0]),
-    transform: [{ scale: interpolate(ring.value, [0, 1], [1.0, 1.5]) }],
+  const sphereStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 0.99 + breath.value * CONFIG[state].scaleAmt }],
   }));
 
-  const box = size * 1.55;
-  const sphere = { width: size, height: size };
+  const box = size * 1.42;
+  const glowOpacity = CONFIG[state].glow;
 
   return (
     <View style={[styles.wrap, { width: box, height: box }]} pointerEvents="none">
       <Animated.View style={[styles.center, floatStyle]}>
-        {/* halo bloom */}
-        <Animated.View style={[styles.layer, { width: box, height: box }, haloStyle]}>
-          <Svg width={box} height={box} viewBox="0 0 320 320">
+        <Animated.View style={[styles.glow, { width: box, height: box, opacity: glowOpacity }, sphereStyle]} />
+        <Animated.View style={[styles.center, { width: size, height: size }, sphereStyle]}>
+          <Svg width={size} height={size} viewBox={`0 0 ${VB} ${VB}`}>
             <Defs>
-              <RadialGradient id="halo" cx="50%" cy="50%" r="50%">
-                <Stop offset="0%" stopColor={theme.gradients.orbHalo} stopOpacity={1} />
-                <Stop offset="55%" stopColor={theme.gradients.orbHalo} stopOpacity={0.35} />
-                <Stop offset="100%" stopColor={theme.gradients.orbHalo} stopOpacity={0} />
+              <RadialGradient id="body" cx="39%" cy="31%" r="78%">
+                <Stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.9" />
+                <Stop offset="18%" stopColor={hot} stopOpacity="0.92" />
+                <Stop offset="48%" stopColor={mid} stopOpacity="0.86" />
+                <Stop offset="100%" stopColor={deep} stopOpacity="0.96" />
+              </RadialGradient>
+              <RadialGradient id="shade" cx="62%" cy="69%" r="68%">
+                <Stop offset="0%" stopColor="#000714" stopOpacity="0" />
+                <Stop offset="100%" stopColor="#00020A" stopOpacity="0.58" />
+              </RadialGradient>
+              <LinearGradient id="filmA" x1="18%" y1="12%" x2="88%" y2="86%">
+                <Stop offset="0%" stopColor="#62E6FF" stopOpacity="0.96" />
+                <Stop offset="34%" stopColor="#366BFF" stopOpacity="0.7" />
+                <Stop offset="66%" stopColor="#F149C9" stopOpacity="0.92" />
+                <Stop offset="100%" stopColor="#FFC07A" stopOpacity="0.88" />
+              </LinearGradient>
+              <LinearGradient id="filmB" x1="86%" y1="8%" x2="20%" y2="90%">
+                <Stop offset="0%" stopColor="#86F5FF" stopOpacity="0.8" />
+                <Stop offset="44%" stopColor="#8E3DFF" stopOpacity="0.72" />
+                <Stop offset="100%" stopColor="#FF4D96" stopOpacity="0.8" />
+              </LinearGradient>
+              <RadialGradient id="glass" cx="34%" cy="23%" r="78%">
+                <Stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.5" />
+                <Stop offset="42%" stopColor="#FFFFFF" stopOpacity="0.05" />
+                <Stop offset="100%" stopColor="#88DFFF" stopOpacity="0.28" />
               </RadialGradient>
             </Defs>
-            <Circle cx="160" cy="160" r="160" fill="url(#halo)" />
+
+            <Circle cx={C} cy={C} r="92" fill="url(#body)" />
+            <Circle cx={C} cy={C} r="92" fill="url(#shade)" />
+
+            <G opacity="0.95">
+              <Ellipse cx="95" cy="86" rx="78" ry="26" fill="none" stroke="url(#filmA)" strokeWidth="13" strokeLinecap="round" transform="rotate(-31 95 86)" />
+              <Ellipse cx="143" cy="136" rx="68" ry="23" fill="none" stroke="url(#filmB)" strokeWidth="12" strokeLinecap="round" transform="rotate(-30 143 136)" />
+            </G>
+
+            <G>
+              <Ellipse cx="118" cy="118" rx="52" ry="31" fill="#F044C9" opacity="0.18" transform="rotate(-26 118 118)" />
+              <Ellipse cx="128" cy="104" rx="62" ry="37" fill="#00B8FF" opacity="0.12" transform="rotate(31 128 104)" />
+            </G>
+
+            <Circle cx={C} cy={C} r="91" fill="url(#glass)" />
+            <Circle cx={C} cy={C} r="91" fill="none" stroke="#AEEBFF" strokeWidth="3.6" opacity="0.72" />
+            <Circle cx={C} cy={C} r="86" fill="none" stroke="#FF64D4" strokeWidth="2.4" opacity="0.34" />
+            <Ellipse cx="77" cy="67" rx="19" ry="57" fill="#FFFFFF" opacity="0.76" transform="rotate(-42 77 67)" />
+            <Ellipse cx="72" cy="61" rx="8" ry="29" fill="#E9FBFF" opacity="0.88" transform="rotate(-42 72 61)" />
+            <Ellipse cx="162" cy="168" rx="10" ry="37" fill="#FFFFFF" opacity="0.25" transform="rotate(43 162 168)" />
           </Svg>
-        </Animated.View>
-
-        {/* listening / speaking rings */}
-        {CONFIG[state].rings && (
-          <Animated.View style={[styles.layer, { width: size * 1.3, height: size * 1.3 }, ringStyle]}>
-            <Svg width={size * 1.3} height={size * 1.3} viewBox="0 0 220 220">
-              <Circle cx={C} cy={C} r="104" fill="none" stroke={theme.colors.accent} strokeWidth="1" opacity={0.5} />
-              <Circle cx={C} cy={C} r="84" fill="none" stroke={theme.colors.accent} strokeWidth="1" opacity={0.3} />
-            </Svg>
-          </Animated.View>
-        )}
-
-        {/* breathing sphere */}
-        <Animated.View style={[styles.center, breatheStyle]}>
-          <View style={[sphere, { borderRadius: size / 2, overflow: 'hidden' }]}>
-            {/* volumetric body */}
-            <Svg width={size} height={size} viewBox="0 0 220 220" style={StyleSheet.absoluteFill}>
-              <Defs>
-                <RadialGradient id="body" cx="36%" cy="30%" r="75%">
-                  <Stop offset="0%" stopColor={core0} />
-                  <Stop offset="42%" stopColor={core1} />
-                  <Stop offset="100%" stopColor={core2} />
-                </RadialGradient>
-                <RadialGradient id="shade" cx="68%" cy="74%" r="70%">
-                  <Stop offset="0%" stopColor="#000000" stopOpacity={0} />
-                  <Stop offset="100%" stopColor="#000000" stopOpacity={0.45} />
-                </RadialGradient>
-              </Defs>
-              <Circle cx={C} cy={C} r="100" fill="url(#body)" />
-              <Circle cx={C} cy={C} r="100" fill="url(#shade)" />
-              {/* rim light */}
-              <Circle cx={C} cy={C} r="99" fill="none" stroke={core0} strokeWidth="1.2" opacity={0.5} />
-            </Svg>
-
-            {/* slow-drifting soft particles (no lightning) */}
-            <Animated.View style={[StyleSheet.absoluteFill, rotateStyle]}>
-              <Animated.View style={[StyleSheet.absoluteFill, flickerStyle]}>
-                <Svg width={size} height={size} viewBox="0 0 220 220">
-                  <Circle cx="150" cy="74" r="1.8" fill={core0} opacity={0.45} />
-                  <Circle cx="78" cy="150" r="1.5" fill={core0} opacity={0.38} />
-                  <Circle cx="156" cy="140" r="1.3" fill={core0} opacity={0.3} />
-                  <Circle cx="84" cy="80" r="1.3" fill={core0} opacity={0.28} />
-                </Svg>
-              </Animated.View>
-            </Animated.View>
-
-            {/* pulsing core */}
-            <Animated.View style={[StyleSheet.absoluteFill, coreStyle]}>
-              <Svg width={size} height={size} viewBox="0 0 220 220">
-                <Defs>
-                  <RadialGradient id="core" cx="50%" cy="50%" r="50%">
-                    <Stop offset="0%" stopColor="#FFFFFF" stopOpacity={0.95} />
-                    <Stop offset="30%" stopColor={core0} stopOpacity={0.7} />
-                    <Stop offset="100%" stopColor={core1} stopOpacity={0} />
-                  </RadialGradient>
-                </Defs>
-                <Circle cx={C} cy="98" r="46" fill="url(#core)" />
-              </Svg>
-            </Animated.View>
-
-            {/* specular highlight (glass reflection) */}
-            <Svg width={size} height={size} viewBox="0 0 220 220" style={StyleSheet.absoluteFill}>
-              <Ellipse cx="84" cy="72" rx="30" ry="18" fill="#FFFFFF" opacity={0.5} transform="rotate(-22 84 72)" />
-              <Ellipse cx="150" cy="156" rx="20" ry="10" fill="#FFFFFF" opacity={0.08} transform="rotate(-22 150 156)" />
-            </Svg>
-          </View>
         </Animated.View>
       </Animated.View>
     </View>
@@ -198,6 +130,14 @@ export function PlasmaOrb({ state = 'idle', size = 200 }: PlasmaOrbProps) {
 
 const styles = StyleSheet.create({
   wrap: { alignItems: 'center', justifyContent: 'center' },
-  center: { alignItems: 'center', justifyContent: 'center', position: 'absolute' },
-  layer: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
+  center: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
+  glow: {
+    position: 'absolute',
+    borderRadius: 999,
+    backgroundColor: 'rgba(38,132,255,0.16)',
+    shadowColor: '#6DDFFF',
+    shadowOpacity: 0.55,
+    shadowRadius: 60,
+    shadowOffset: { width: 0, height: 0 },
+  },
 });

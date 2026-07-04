@@ -3,6 +3,7 @@ import { AIService, AIMessage, AIGenerationResult } from '@/services/ai';
 import { ConversationRepository, Conversation } from '@/services/conversation';
 import { TTSService, TTSState } from '@/services/voice';
 import { ActionService, ActionResult } from '@/services/actions';
+import { SocialGreetingService } from '@/services/social';
 import { IntentResult, IntentType } from '@/engine/intentEngine';
 
 /** High-level assistant phase surfaced to the UI. */
@@ -146,6 +147,32 @@ export function useConversation(): UseConversationResult {
       });
       // Functional update + the load-time copy guarantee no duplication here.
       setMessages((prev) => [...prev, userMessage]);
+
+      if (intent?.intent === 'social_greeting') {
+        setState('thinking');
+        try {
+          const replyText = SocialGreetingService.generate({
+            relationship: intent.entities?.relationship,
+            name: intent.entities?.name,
+            gender: intent.entities?.gender,
+            rawText: input,
+          });
+
+          const assistantMessage = await ConversationRepository.addMessage({
+            conversationId: currentConversation?.id || '',
+            role: 'assistant',
+            content: replyText,
+          });
+          setMessages((prev) => [...prev, assistantMessage]);
+          setLastResponse(replyText);
+          await TTSService.speak(replyText);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Social greeting failed');
+        } finally {
+          setState('idle');
+        }
+        return;
+      }
 
       // ── Branch 1: device action ──────────────────────────────────────────
       if (intent && intent.intent !== 'unknown' && isActionIntent(intent.intent)) {

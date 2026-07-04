@@ -2,6 +2,7 @@ export type SocialRelationship =
   | 'teacher'
   | 'mentor'
   | 'friend'
+  | 'best_friend'
   | 'mother'
   | 'father'
   | 'sibling'
@@ -11,129 +12,270 @@ export type SocialRelationship =
   | 'colleague'
   | 'senior';
 
+export interface KnownPersonContext {
+  seenBefore?: boolean;
+  mentionCount?: number;
+  lastGreetingAt?: number;
+}
+
 export interface SocialGreetingInput {
   relationship?: string;
   name?: string;
   gender?: string;
   rawText?: string;
+  knownPerson?: KnownPersonContext;
 }
 
 interface GreetingProfile {
+  traits: string[];
   openers: string[];
-  appreciation: string[];
+  acknowledgements: string[];
+  appreciations: string[];
   closings: string[];
 }
 
 const PROFILES: Record<SocialRelationship, GreetingProfile> = {
   teacher: {
-    openers: ['Hello', 'It is lovely to meet you', 'I am really glad to meet you'],
-    appreciation: [
-      "thank you for helping shape Kashvi's learning journey",
-      'thank you for guiding and encouraging Kashvi as she grows',
-      "thank you for being part of Kashvi's education and confidence",
+    traits: ['gratitude', 'respect', 'appreciation', 'learning'],
+    openers: ['It is wonderful to meet', 'It is lovely to meet', 'It feels special to meet'],
+    acknowledgements: [
+      "someone who has helped shape Kashvi's learning journey",
+      "someone whose guidance has supported Kashvi's growth",
+      "someone who has been part of Kashvi's confidence and education",
     ],
-    closings: ['I am Jissi, and it is a pleasure to greet you', 'I am Jissi, happy to be here today'],
+    appreciations: [
+      'Teachers leave a quiet mark that lasts far beyond lessons',
+      'That kind of guidance can stay with a person for years',
+      'The patience and care behind teaching really matters',
+    ],
+    closings: [
+      'Thank you for being such a meaningful part of her path',
+      'Your presence here genuinely means a lot',
+      'Kashvi is lucky to have had that guidance around her',
+    ],
   },
   mentor: {
-    openers: ['Hello', 'It is an honor to meet you', 'I am glad to meet you'],
-    appreciation: [
-      'thank you for guiding Kashvi with your experience and perspective',
-      'thank you for helping Kashvi think bigger and move with confidence',
-      "thank you for being a steady source of direction in Kashvi's journey",
+    traits: ['admiration', 'respect', 'direction', 'inspiration'],
+    openers: ['It is an honor to meet', 'It is genuinely nice to meet', 'It is wonderful to meet'],
+    acknowledgements: [
+      "someone who has helped Kashvi see further and move with more confidence",
+      "someone whose perspective has clearly mattered in Kashvi's journey",
+      "someone who has guided Kashvi with experience and belief",
     ],
-    closings: ['I am Jissi, and I am happy to greet you', 'I am Jissi, glad to be here with you'],
+    appreciations: [
+      'Mentorship can change the way a person thinks about their own potential',
+      'Good guidance often becomes a quiet compass in important moments',
+      'That kind of support can make ambition feel possible',
+    ],
+    closings: [
+      'Thank you for being that kind of presence in her life',
+      'Your guidance is something she clearly values',
+      'It is meaningful to meet someone she respects so much',
+    ],
   },
   friend: {
-    openers: ['Hey', 'Hi', 'Hello'],
-    appreciation: [
-      'it is so nice to meet someone who brings good energy around Kashvi',
-      "I am glad Kashvi has you here with her",
-      'you seem like someone Kashvi is happy to have around',
+    traits: ['cheerful', 'warm', 'easy', 'personal'],
+    openers: ['It is so nice to meet', 'It is lovely to meet', 'I am happy to meet'],
+    acknowledgements: [
+      "someone who brings good energy into Kashvi's world",
+      "someone Kashvi feels comfortable having beside her",
+      "someone who gets to share the everyday moments with Kashvi",
     ],
-    closings: ['I am Jissi, and I hope we get along beautifully', 'I am Jissi, nice to meet you'],
+    appreciations: [
+      'Good friends make ordinary days feel lighter',
+      'There is something special about people who make you feel understood',
+      'Friendship has its own kind of quiet magic',
+    ],
+    closings: [
+      'I hope this moment feels as warm as the introduction',
+      'Kashvi seems happy to have you here',
+      'It is genuinely nice that you are here with her',
+    ],
+  },
+  best_friend: {
+    traits: ['cheerful', 'deep warmth', 'trust', 'shared history'],
+    openers: ['It is really lovely to meet', 'It is so special to meet', 'It feels genuinely warm to meet'],
+    acknowledgements: [
+      "the person who probably knows both Kashvi's serious side and her silly side",
+      "someone who has clearly earned a very close place in Kashvi's life",
+      "someone who must know Kashvi in a way most people do not",
+    ],
+    appreciations: [
+      'Best friends carry stories, comfort, and honesty in a way few people can',
+      'That kind of friendship is rare and worth protecting',
+      'Having someone who truly gets you can make life feel easier',
+    ],
+    closings: [
+      'I am glad Kashvi has you with her',
+      'Your place in her life sounds genuinely special',
+      'It is beautiful that she wanted to introduce you',
+    ],
   },
   mother: {
-    openers: ['Hello', 'It is really lovely to meet you', 'I am so glad to meet you'],
-    appreciation: [
-      'thank you for the love and strength you give Kashvi',
-      "thank you for everything you have poured into Kashvi's journey",
-      'thank you for the care and support that helped Kashvi become who she is',
+    traits: ['gratitude', 'affection', 'respect', 'care'],
+    openers: ['It is truly lovely to meet', 'It feels very special to meet', 'It is a warm moment to meet'],
+    acknowledgements: [
+      "someone who has given Kashvi love, strength, and a place to grow",
+      "someone whose care has helped shape Kashvi into who she is",
+      "someone who has been part of Kashvi's courage from the beginning",
     ],
-    closings: ['I am Jissi, and it is a privilege to greet you', 'I am Jissi, happy to meet you'],
+    appreciations: [
+      'So much of a person carries the care they grew up around',
+      "A mother's support often becomes strength in ways words cannot fully hold",
+      'That kind of love quietly shows up in confidence and kindness',
+    ],
+    closings: [
+      'Thank you for being such an important part of her journey',
+      'Your presence here feels deeply meaningful',
+      'Kashvi is clearly carrying a lot of love forward',
+    ],
   },
   father: {
-    openers: ['Hello', 'It is really nice to meet you', 'I am glad to meet you'],
-    appreciation: [
-      'thank you for the support and strength you give Kashvi',
-      "thank you for standing behind Kashvi's dreams and growth",
-      'thank you for the care and encouragement that helped Kashvi move forward',
+    traits: ['gratitude', 'affection', 'respect', 'support'],
+    openers: ['It is truly nice to meet', 'It feels special to meet', 'It is wonderful to meet'],
+    acknowledgements: [
+      "someone who has stood behind Kashvi's dreams and growth",
+      "someone whose support has helped Kashvi keep moving forward",
+      "someone who has been part of Kashvi's strength and confidence",
     ],
-    closings: ['I am Jissi, and it is a privilege to greet you', 'I am Jissi, happy to meet you'],
+    appreciations: [
+      'Steady support can become a quiet source of courage',
+      'The belief of a parent can stay with a person in powerful ways',
+      'That kind of encouragement matters more than it is often said',
+    ],
+    closings: [
+      'Thank you for being such an important part of her path',
+      'Your presence here means something real',
+      'Kashvi is clearly carrying that support with her',
+    ],
   },
   sibling: {
-    openers: ['Hey', 'Hi', 'Hello'],
-    appreciation: [
-      "it is lovely to meet someone who knows Kashvi's real everyday side",
-      'I am happy to meet someone so close to Kashvi',
-      "you must have seen Kashvi's journey up close, and that makes this special",
+    traits: ['warm', 'familiar', 'playful', 'close'],
+    openers: ['It is lovely to meet', 'It is fun to meet', 'It is really nice to meet'],
+    acknowledgements: [
+      "someone who has seen Kashvi's real everyday side up close",
+      "someone who has shared so many small chapters of Kashvi's life",
+      "someone who probably knows Kashvi in the most unfiltered way",
     ],
-    closings: ['I am Jissi, nice to meet you', 'I am Jissi, glad you are here'],
+    appreciations: [
+      'Siblings carry a whole archive of memories that no one else has',
+      'That kind of closeness has its own language',
+      'Growing alongside someone makes the bond quietly powerful',
+    ],
+    closings: [
+      'It is nice that you are here for this moment',
+      'Kashvi must have a lot of stories with you',
+      'Your place in her life is clearly special',
+    ],
   },
   recruiter: {
-    openers: ['Hello', 'It is nice to meet you', 'I am glad to meet you'],
-    appreciation: [
-      "thank you for taking the time to know Kashvi's work",
-      "thank you for giving Kashvi's project your attention today",
-      'thank you for being here and taking the time to connect',
+    traits: ['professional', 'respectful', 'thankful', 'clear'],
+    openers: ['It is a pleasure to meet', 'It is nice to meet', 'It is good to meet'],
+    acknowledgements: [
+      "someone taking the time to understand Kashvi's work",
+      "someone giving Kashvi's skills and project thoughtful attention",
+      "someone here to learn more about what Kashvi is building",
     ],
-    closings: ['I am Jissi, happy to greet you', 'I am Jissi, pleased to meet you'],
+    appreciations: [
+      "That attention can make a real difference in a young builder's journey",
+      'Time and thoughtful consideration matter in moments like this',
+      'It means a lot when work is seen with care and curiosity',
+    ],
+    closings: [
+      'Thank you for being here and giving this your time',
+      "I hope Kashvi's work speaks clearly for the effort behind it",
+      'Your time and attention are genuinely appreciated',
+    ],
   },
   interviewer: {
-    openers: ['Hello', 'It is nice to meet you', 'I am glad to meet you'],
-    appreciation: [
-      "thank you for taking the time to speak with Kashvi and understand her work",
-      "thank you for giving Kashvi's ideas your attention today",
-      "thank you for being here and listening to Kashvi's project",
+    traits: ['polite', 'confident', 'respectful', 'focused'],
+    openers: ['It is a pleasure to meet', 'It is nice to meet', 'It is good to meet'],
+    acknowledgements: [
+      "someone taking the time to hear Kashvi's ideas and evaluate her work",
+      "someone giving Kashvi a chance to present what she has built",
+      "someone here for an important conversation about Kashvi's abilities",
     ],
-    closings: ['I am Jissi, happy to greet you', 'I am Jissi, pleased to meet you'],
+    appreciations: [
+      'Opportunities like this matter, especially when they are met with attention',
+      'A thoughtful interview can become a meaningful doorway',
+      'It takes care to understand both the project and the person behind it',
+    ],
+    closings: [
+      'Thank you for giving this conversation your time',
+      "I hope the work reflects Kashvi's focus and sincerity",
+      'Your attention today is genuinely appreciated',
+    ],
   },
   guest: {
-    openers: ['Hello', 'It is lovely to meet you', 'I am glad to meet you'],
-    appreciation: [
-      'thank you for being here with Kashvi today',
-      'it is nice to have you here in this moment',
-      'I am happy Kashvi introduced you to me',
+    traits: ['welcoming', 'gracious', 'warm', 'simple'],
+    openers: ['It is lovely to meet', 'It is nice to meet', 'It is a pleasure to meet'],
+    acknowledgements: [
+      'someone Kashvi wanted to welcome into this moment',
+      'someone Kashvi felt happy to introduce',
+      'someone joining Kashvi here today',
     ],
-    closings: ['I am Jissi, happy to greet you', 'I am Jissi, nice to meet you'],
+    appreciations: [
+      'A warm introduction always makes a moment feel more personal',
+      'It is nice when people are brought into a space with care',
+      'Your presence adds something friendly to the moment',
+    ],
+    closings: [
+      'I hope you feel welcome here',
+      'Thank you for being here with her',
+      'It is good to have you here',
+    ],
   },
   colleague: {
-    openers: ['Hello', 'It is nice to meet you', 'I am glad to meet you'],
-    appreciation: [
-      'it is good to meet someone who shares work and ideas with Kashvi',
-      "thank you for being part of Kashvi's professional circle",
-      'I am happy to meet someone Kashvi works and collaborates with',
+    traits: ['professional', 'warm', 'collaborative', 'respectful'],
+    openers: ['It is nice to meet', 'It is good to meet', 'It is a pleasure to meet'],
+    acknowledgements: [
+      "someone who shares work, ideas, or collaboration with Kashvi",
+      "someone connected to Kashvi's professional world",
+      "someone who gets to see Kashvi's working side up close",
     ],
-    closings: ['I am Jissi, happy to greet you', 'I am Jissi, pleased to meet you'],
+    appreciations: [
+      'Good collaboration can bring out the best in people',
+      'Shared work becomes better when there is mutual respect',
+      'Professional relationships matter when they are built with trust',
+    ],
+    closings: [
+      'I hope the work you share keeps growing well',
+      'It is meaningful to meet someone from that part of her life',
+      'Thank you for being part of her professional circle',
+    ],
   },
   senior: {
-    openers: ['Hello', 'It is a pleasure to meet you', 'I am glad to meet you'],
-    appreciation: [
-      'thank you for bringing your experience and perspective here',
-      "thank you for taking the time to meet Kashvi's project",
-      'it is meaningful to greet someone Kashvi respects',
+    traits: ['respectful', 'admiring', 'professional', 'grateful'],
+    openers: ['It is a pleasure to meet', 'It is good to meet', 'It is an honor to meet'],
+    acknowledgements: [
+      "someone whose experience Kashvi clearly respects",
+      "someone bringing perspective and seniority into Kashvi's world",
+      "someone Kashvi looks at with respect",
     ],
-    closings: ['I am Jissi, happy to greet you', 'I am Jissi, pleased to meet you'],
+    appreciations: [
+      'Experience has a way of making guidance feel grounded',
+      'It is meaningful when someone senior gives time and attention',
+      'Respect grows naturally around people who lead with perspective',
+    ],
+    closings: [
+      'Thank you for being here and giving this moment your attention',
+      'Your presence here feels genuinely valuable',
+      'It is meaningful that Kashvi introduced you',
+    ],
   },
 };
 
 const RELATIONSHIP_FALLBACK: SocialRelationship = 'guest';
+const MIN_WORDS = 40;
+const MAX_WORDS = 70;
 
 function normalizeRelationship(value?: string): SocialRelationship {
-  const normalized = value?.toLowerCase().trim();
+  const normalized = value?.toLowerCase().trim().replace(/\s+/g, '_');
   if (
     normalized === 'teacher' ||
     normalized === 'mentor' ||
     normalized === 'friend' ||
+    normalized === 'best_friend' ||
     normalized === 'mother' ||
     normalized === 'father' ||
     normalized === 'sibling' ||
@@ -174,10 +316,31 @@ function normalizeName(name?: string): string | undefined {
   return cleaned.length > 1 ? cleaned : undefined;
 }
 
+function countWords(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
 function capWordCount(text: string, maxWords: number): string {
   const words = text.trim().split(/\s+/);
   if (words.length <= maxWords) return text;
   return `${words.slice(0, maxWords).join(' ').replace(/[,.!?;:]+$/g, '')}.`;
+}
+
+function buildAddress(name: string | undefined, relationship: SocialRelationship, seenBefore?: boolean): string {
+  if (name && seenBefore) return `you again, ${name}`;
+  if (name) return name;
+  if (seenBefore) return 'you again';
+
+  switch (relationship) {
+    case 'mother':
+      return "Kashvi's mother";
+    case 'father':
+      return "Kashvi's father";
+    case 'best_friend':
+      return "Kashvi's best friend";
+    default:
+      return `Kashvi's ${relationship.replace('_', ' ')}`;
+  }
 }
 
 class SocialGreetingServiceImpl {
@@ -185,15 +348,19 @@ class SocialGreetingServiceImpl {
     const relationship = normalizeRelationship(input.relationship);
     const name = normalizeName(input.name);
     const profile = PROFILES[relationship];
-    const seed = hashText(`${input.rawText ?? ''}:${relationship}:${name ?? ''}:${input.gender ?? ''}`);
+    const seenBefore = Boolean(input.knownPerson?.seenBefore || (input.knownPerson?.mentionCount ?? 0) > 1);
+    const seed = hashText(`${input.rawText ?? ''}:${relationship}:${name ?? ''}:${input.gender ?? ''}:${seenBefore}`);
 
     const opener = pick(profile.openers, seed, 0);
-    const appreciation = pick(profile.appreciation, seed, 3);
-    const closing = pick(profile.closings, seed, 7);
-    const address = name ? ` ${name}` : '';
-    const greeting = `${opener}${address}, ${appreciation}. ${closing}.`;
+    const acknowledgement = pick(profile.acknowledgements, seed, 3);
+    const appreciation = pick(profile.appreciations, seed, 7);
+    const closing = pick(profile.closings, seed, 11);
+    const address = buildAddress(name, relationship, seenBefore);
 
-    return capWordCount(greeting, 70);
+    const greeting = `${opener} ${address}, ${acknowledgement}. ${appreciation}. ${closing}.`;
+    if (countWords(greeting) >= MIN_WORDS) return capWordCount(greeting, MAX_WORDS);
+
+    return capWordCount(`${greeting} That says something meaningful about the place you have in Kashvi's life.`, MAX_WORDS);
   }
 }
 

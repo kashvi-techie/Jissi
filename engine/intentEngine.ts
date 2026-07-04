@@ -1,24 +1,8 @@
 /**
- * IntentEngine — a lightweight, rule-based intent classifier.
+ * IntentEngine - a lightweight, rule-based intent classifier.
  *
- * Maps raw transcript text to a structured {@link IntentResult}. It is a pure
- * module (no imports, no side effects), which makes it trivial to unit-test and
- * safe to call from anywhere (hooks, services, screens).
- *
- * ───────────────────────────────────────────────────────────────────────────
- * HOW TO ADD A NEW COMMAND (3 steps):
- *   1. Add the intent name to the `IntentType` union.
- *   2. Append an entry to the `INTENT_RULES` registry below (patterns + an
- *      optional `extractQuery`). Rules are evaluated top-to-bottom; first match
- *      wins, so place more specific rules above broader ones.
- *   3. If the intent triggers a device action, map it in
- *      `services/actions/types.ts -> INTENT_TO_ACTION` (and handle it in
- *      `ActionService.executeFromIntent`).
- *
- * For future scale (many commands / fuzzy matching / NLU), this rule registry
- * can be swapped for an LLM classifier behind the SAME `detectIntent` signature
- * without touching any caller.
- * ───────────────────────────────────────────────────────────────────────────
+ * Maps raw transcript text to a structured IntentResult. It is pure, has no
+ * side effects, and is safe to call from hooks, services, or UI.
  */
 
 /** All intents JISSI can recognize. Extend this union to add commands. */
@@ -36,7 +20,7 @@ export type IntentConfidence = 'high' | 'medium' | 'low';
 export interface IntentResult {
   intent: IntentType;
   confidence: IntentConfidence;
-  /** Optional extracted argument (e.g. the search terms for `search_google`). */
+  /** Optional extracted argument, such as search terms for search_google. */
   query?: string;
   /** Optional structured arguments for richer local capabilities. */
   entities?: {
@@ -49,9 +33,9 @@ export interface IntentResult {
 /** A single classification rule in the registry. */
 export interface IntentRule {
   intent: IntentType;
-  /** The rule fires if ANY pattern matches the trimmed text. */
+  /** The rule fires if any pattern matches the trimmed text. */
   patterns: RegExp[];
-  /** Optional argument extractor (e.g. pull the search query out of the text). */
+  /** Optional argument extractor, such as pulling a search query from text. */
   extractQuery?: (text: string) => string | undefined;
   /** Optional structured argument extractor for local capabilities. */
   extractEntities?: (text: string) => IntentResult['entities'];
@@ -65,6 +49,8 @@ const RELATIONSHIP_ALIASES: Record<string, string> = {
   mam: 'teacher',
   mentor: 'mentor',
   guide: 'mentor',
+  'best friend': 'best_friend',
+  bestie: 'best_friend',
   friend: 'friend',
   buddy: 'friend',
   mother: 'mother',
@@ -85,16 +71,19 @@ const RELATIONSHIP_ALIASES: Record<string, string> = {
   senior: 'senior',
 };
 
+const RELATIONSHIP_WORDS = Object.keys(RELATIONSHIP_ALIASES).sort((a, b) => b.length - a.length);
+const RELATIONSHIP_PATTERN = RELATIONSHIP_WORDS.join('|');
+
 function normalizeRelationship(value?: string): string | undefined {
   if (!value) return undefined;
-  const key = value.toLowerCase().replace(/[.'’]/g, '').trim();
+  const key = value.toLowerCase().replace(/[.']/g, '').replace(/\s+/g, ' ').trim();
   return RELATIONSHIP_ALIASES[key];
 }
 
 function titleCaseName(name?: string): string | undefined {
   if (!name) return undefined;
   const cleaned = name
-    .replace(/\b(my|the|a|an|is|here|standing|beside|with|me|please|greet|meet|this)\b/gi, ' ')
+    .replace(/\b(my|the|a|an|is|here|standing|beside|with|me|please|greet|meet|this|for|as|regarding|favourite|favorite)\b/gi, ' ')
     .replace(/[,.!?]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -105,8 +94,13 @@ function titleCaseName(name?: string): string | undefined {
     .slice(0, 4)
     .map((part) => {
       const lower = part.toLowerCase();
-      if (['sir', 'mam', 'maam', 'ma’am', 'mr', 'mrs', 'ms', 'dr'].includes(lower)) {
-        return lower === 'maam' ? 'maam' : part;
+      if (['sir', 'mam', 'maam', 'mr', 'mrs', 'ms', 'dr'].includes(lower)) {
+        if (lower === 'maam' || lower === 'mam') return "ma'am";
+        if (lower === 'mr') return 'Mr.';
+        if (lower === 'mrs') return 'Mrs.';
+        if (lower === 'ms') return 'Ms.';
+        if (lower === 'dr') return 'Dr.';
+        return part;
       }
       return part.charAt(0).toUpperCase() + part.slice(1);
     })
@@ -116,7 +110,7 @@ function titleCaseName(name?: string): string | undefined {
 function inferGender(text: string, relationship?: string, name?: string): string | undefined {
   const source = `${text} ${name ?? ''}`.toLowerCase();
   if (/\b(he|him|his|sir|mr|father|dad|papa|brother)\b/.test(source)) return 'male';
-  if (/\b(she|her|mam|maam|ma’am|mrs|ms|mother|mom|mummy|maa|sister)\b/.test(source)) return 'female';
+  if (/\b(she|her|mam|maam|mrs|ms|mother|mom|mummy|maa|sister)\b/.test(source)) return 'female';
   if (relationship === 'mother') return 'female';
   if (relationship === 'father') return 'male';
   return undefined;
@@ -124,15 +118,15 @@ function inferGender(text: string, relationship?: string, name?: string): string
 
 function extractSocialGreetingEntities(text: string): IntentResult['entities'] {
   const normalized = text.trim();
-  const relPattern = Object.keys(RELATIONSHIP_ALIASES).join('|');
-
-  const relationshipMatch = normalized.match(new RegExp(`\\b(${relPattern})\\b`, 'i'));
+  const relationshipMatch = normalized.match(new RegExp(`\\b(${RELATIONSHIP_PATTERN})\\b`, 'i'));
   const relationship = normalizeRelationship(relationshipMatch?.[1]);
 
   const namePatterns = [
-    new RegExp(`\\b(?:this is|meet|here'?s|here is|introducing)\\s+([a-z][a-z.'’]*(?:\\s+[a-z][a-z.'’]*){0,3})\\s*,?\\s*(?:my\\s+)?(?:${relPattern})\\b`, 'i'),
-    new RegExp(`\\b(?:my\\s+)?(?:${relPattern})\\s+([a-z][a-z.'’]*(?:\\s+[a-z][a-z.'’]*){0,3})\\s+(?:is\\s+)?(?:here|with|standing|beside)\\b`, 'i'),
-    new RegExp(`\\b(?:please\\s+)?greet\\s+(?:my\\s+)?(?:${relPattern})\\s*,?\\s*([a-z][a-z.'’]*(?:\\s+[a-z][a-z.'’]*){0,3})?`, 'i'),
+    /\b(?:this is|meet|here'?s|here is|introducing)\s+([a-z][a-z.']*(?:\s+[a-z][a-z.']*){0,2}\s+(?:sir|mam|maam))\b/i,
+    new RegExp(`\\b(?:this is|meet|here'?s|here is|introducing)\\s+([a-z][a-z.']*(?:\\s+[a-z][a-z.']*){0,3})\\s*,?\\s*(?:my\\s+)?(?:favo[u]?rite\\s+)?(?:${RELATIONSHIP_PATTERN})\\b`, 'i'),
+    new RegExp(`\\b(?:my\\s+)?(?:favo[u]?rite\\s+)?(?:${RELATIONSHIP_PATTERN})\\s+([a-z][a-z.']*(?:\\s+[a-z][a-z.']*){0,3})\\s+(?:is\\s+)?(?:here|with|standing|beside)\\b`, 'i'),
+    new RegExp(`\\b(?:please\\s+)?greet\\s+(?:my\\s+)?(?:favo[u]?rite\\s+)?(?:${RELATIONSHIP_PATTERN})\\s*,?\\s*([a-z][a-z.']*(?:\\s+[a-z][a-z.']*){0,3})?`, 'i'),
+    new RegExp(`\\b(?:regarding|for|as)\\s+(?:my\\s+)?(?:favo[u]?rite\\s+)?(?:${RELATIONSHIP_PATTERN})\\b.*\\b(?:this is|meet|here'?s|here is|introducing)\\s+([a-z][a-z.']*(?:\\s+[a-z][a-z.']*){0,3})\\b`, 'i'),
   ];
 
   let name: string | undefined;
@@ -152,19 +146,19 @@ function extractSocialGreetingEntities(text: string): IntentResult['entities'] {
 }
 
 /**
- * The intent registry — the single place to add/modify commands.
+ * The intent registry - the single place to add or modify commands.
  * Evaluated in order; the first matching rule wins.
  */
 export const INTENT_RULES: IntentRule[] = [
   {
     intent: 'social_greeting',
     patterns: [
-      /\b(this is|meet|greet|introducing|here'?s|here is)\s+(my\s+)?(teacher|professor|mentor|guide|friend|buddy|mother|mom|mummy|maa|father|dad|papa|sibling|brother|sister|recruiter|interviewer|guest|colleague|coworker|senior)\b/i,
-      /\b(my\s+)?(teacher|professor|mentor|guide|friend|buddy|mother|mom|mummy|maa|father|dad|papa|sibling|brother|sister|recruiter|interviewer|guest|colleague|coworker|senior)\s+(is\s+)?(here|with me|standing beside me|beside me)\b/i,
-      /\b(this is|meet|here'?s|here is|introducing)\s+[a-z][a-z.'’]*(?:\s+[a-z][a-z.'’]*){0,3}\s*,?\s*(my\s+)?(teacher|professor|mentor|guide|friend|buddy|mother|mom|mummy|maa|father|dad|papa|sibling|brother|sister|recruiter|interviewer|guest|colleague|coworker|senior)\b/i,
-      /\b(this is|meet|here'?s|here is|introducing)\s+[a-z][a-z.'’]*(?:\s+[a-z][a-z.'’]*){0,2}\s+(sir|mam|maam|ma’am)\b/i,
-      /\b(regarding|for|as)\s+(my\s+)?(teacher|professor|mentor|guide|friend|buddy|mother|mom|mummy|maa|father|dad|papa|sibling|brother|sister|recruiter|interviewer|guest|colleague|coworker|senior)\b.*\b(this is|meet|here'?s|here is|introducing)\s+[a-z][a-z.'’]*(?:\s+[a-z][a-z.'’]*){0,3}\b/i,
-      /\bplease\s+greet\s+(my\s+)?(teacher|professor|mentor|guide|friend|buddy|mother|mom|mummy|maa|father|dad|papa|sibling|brother|sister|recruiter|interviewer|guest|colleague|coworker|senior)\b/i,
+      new RegExp(`\\b(this is|meet|greet|introducing|here'?s|here is)\\s+(my\\s+)?(favo[u]?rite\\s+)?(${RELATIONSHIP_PATTERN})\\b`, 'i'),
+      new RegExp(`\\b(my\\s+)?(favo[u]?rite\\s+)?(${RELATIONSHIP_PATTERN})\\s+(is\\s+)?(here|with me|standing beside me|beside me)\\b`, 'i'),
+      new RegExp(`\\b(this is|meet|here'?s|here is|introducing)\\s+[a-z][a-z.']*(?:\\s+[a-z][a-z.']*){0,3}\\s*,?\\s*(my\\s+)?(favo[u]?rite\\s+)?(${RELATIONSHIP_PATTERN})\\b`, 'i'),
+      /\b(this is|meet|here'?s|here is|introducing)\s+[a-z][a-z.']*(?:\s+[a-z][a-z.']*){0,2}\s+(sir|mam|maam)\b/i,
+      new RegExp(`\\b(regarding|for|as)\\s+(my\\s+)?(favo[u]?rite\\s+)?(${RELATIONSHIP_PATTERN})\\b.*\\b(this is|meet|here'?s|here is|introducing)\\s+[a-z][a-z.']*(?:\\s+[a-z][a-z.']*){0,3}\\b`, 'i'),
+      new RegExp(`\\bplease\\s+greet\\s+(my\\s+)?(favo[u]?rite\\s+)?(${RELATIONSHIP_PATTERN})\\b`, 'i'),
     ],
     extractQuery: (text) => text.trim(),
     extractEntities: extractSocialGreetingEntities,
@@ -200,10 +194,10 @@ export const INTENT_RULES: IntentRule[] = [
 ];
 
 /**
- * Classify a raw transcript into an {@link IntentResult}.
+ * Classify a raw transcript into an IntentResult.
  *
- * @param rawText The (possibly untrimmed) transcript.
- * @returns The matched intent, or `unknown` (with the text echoed as `query`).
+ * @param rawText The possibly untrimmed transcript.
+ * @returns The matched intent, or unknown with the text echoed as query.
  */
 export function detectIntent(rawText: string): IntentResult {
   const text = rawText.trim();

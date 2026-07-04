@@ -67,6 +67,7 @@ export const APP_PACKAGES: Record<string, string> = {
 };
 
 export const INTENT_TO_ACTION: Record<IntentType, ActionType> = {
+  social_greeting: 'unknown',
   open_youtube: 'open_app',
   open_chrome: 'open_app',
   open_whatsapp: 'open_app',

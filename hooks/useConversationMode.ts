@@ -5,6 +5,7 @@ import { useConversation, AssistantState } from './useConversation';
 import { SpeechState } from '@/services/speech/types';
 import { AIMessage } from '@/services/ai';
 import { HapticsService } from '@/services/haptics';
+import { BehaviorEngine } from '@/services/behavior';
 
 /**
  * Continuous Conversation Mode.
@@ -93,6 +94,7 @@ export function useConversationMode(): UseConversationModeResult {
   const prevAssistantRef = useRef<AssistantState>(assistantState);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorCountRef = useRef(0);
+  const sessionStartRef = useRef<number | null>(null);
 
   const clearTimer = useCallback(() => {
     if (restartTimerRef.current) {
@@ -111,6 +113,16 @@ export function useConversationMode(): UseConversationModeResult {
   }, [clearTranscript, startListening]);
 
   const stopConversation = useCallback(() => {
+    const startedAt = sessionStartRef.current;
+    if (startedAt) {
+      BehaviorEngine.recordEvent({
+        category: 'conversation',
+        intent: 'conversation_ended',
+        metadata: { durationMs: Date.now() - startedAt },
+        confidence: 0.6,
+      });
+    }
+    sessionStartRef.current = null;
     isActiveRef.current = false;
     setIsActive(false);
     clearTimer();
@@ -122,6 +134,12 @@ export function useConversationMode(): UseConversationModeResult {
   const startConversation = useCallback(() => {
     if (!isSupported || isActiveRef.current) return;
     isActiveRef.current = true;
+    sessionStartRef.current = Date.now();
+    BehaviorEngine.recordEvent({
+      category: 'conversation',
+      intent: 'conversation_started',
+      confidence: 0.55,
+    });
     setIsActive(true);
     errorCountRef.current = 0;
     beginListening();
@@ -140,6 +158,14 @@ export function useConversationMode(): UseConversationModeResult {
       const t = text.trim();
       if (!t) return;
       isActiveRef.current = true;
+      sessionStartRef.current = Date.now();
+      BehaviorEngine.recordEvent({
+        category: 'conversation',
+        intent: 'conversation_started',
+        metadata: { source: 'prompt_card' },
+        confidence: 0.55,
+      });
+      BehaviorEngine.recordIntent('prompt_card', { text: t });
       setIsActive(true);
       errorCountRef.current = 0;
       prevTranscriptRef.current = '';
@@ -175,6 +201,12 @@ export function useConversationMode(): UseConversationModeResult {
       // Close the mic during processing + TTS so the spoken reply can never be
       // captured as user speech.
       stopListening();
+      if (intentResult?.intent) {
+        BehaviorEngine.recordIntent(intentResult.intent, {
+          query: intentResult.query,
+          text: transcript,
+        });
+      }
       processInput(transcript, intentResult);
     }
   }, [transcript, speechState, assistantState, intentResult, processInput, stopListening]);

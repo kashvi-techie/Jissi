@@ -5,6 +5,7 @@ import { TTSService, TTSState } from '@/services/voice';
 import { ActionService, ActionResult } from '@/services/actions';
 import { SocialGreetingService } from '@/services/social';
 import { PersonalityService } from '@/services/personality';
+import { ContextEngine } from '@/services/context';
 import { IntentResult, IntentType } from '@/engine/intentEngine';
 
 /** High-level assistant phase surfaced to the UI. */
@@ -148,6 +149,7 @@ export function useConversation(): UseConversationResult {
       });
       // Functional update + the load-time copy guarantee no duplication here.
       setMessages((prev) => [...prev, userMessage]);
+      await ContextEngine.observe({ input, intent });
 
       if (intent?.intent === 'social_greeting') {
         setState('thinking');
@@ -166,6 +168,7 @@ export function useConversation(): UseConversationResult {
           });
           setMessages((prev) => [...prev, assistantMessage]);
           setLastResponse(replyText);
+          await ContextEngine.rememberAssistantResponse(replyText);
           await TTSService.speak(replyText);
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Social greeting failed');
@@ -195,6 +198,7 @@ export function useConversation(): UseConversationResult {
           });
           setMessages((prev) => [...prev, assistantMessage]);
           if (result.status === 'success') setLastResponse(replyText);
+          await ContextEngine.rememberAssistantResponse(replyText);
           await TTSService.speak(replyText);
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Action failed');
@@ -214,7 +218,8 @@ export function useConversation(): UseConversationResult {
 
       setState('thinking');
       try {
-        const result: AIGenerationResult = await AIService.generate(input);
+        const contextualPrompt = await ContextEngine.buildPromptContext(input);
+        const result: AIGenerationResult = await AIService.generate(contextualPrompt);
 
         const assistantMessage = await ConversationRepository.addMessage({
           conversationId: currentConversation?.id || '',
@@ -223,6 +228,7 @@ export function useConversation(): UseConversationResult {
         });
         setMessages((prev) => [...prev, assistantMessage]);
         setLastResponse(result.text);
+        await ContextEngine.rememberAssistantResponse(result.text);
 
         await TTSService.speak(result.text);
       } catch (err) {

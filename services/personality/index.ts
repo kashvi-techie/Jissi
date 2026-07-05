@@ -1,0 +1,1 @@
+export { PersonalityService } from './PersonalityService';

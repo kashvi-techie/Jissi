@@ -14,6 +14,7 @@ export interface MemoryStore {
   remember(key: string, value: string): Promise<void>;
   recall(key?: string): Promise<MemoryEntry[]>;
   forget(key: string): Promise<void>;
+  count(): Promise<number>;
 }
 
 const PREFIX = '@jissi/memory/';
@@ -35,6 +36,11 @@ class AsyncMemoryStore implements MemoryStore {
 
   async forget(key: string): Promise<void> {
     await AsyncStorage.removeItem(PREFIX + key);
+  }
+
+  async count(): Promise<number> {
+    const keys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(PREFIX));
+    return keys.length;
   }
 }
 

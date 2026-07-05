@@ -3,6 +3,7 @@ import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
 import { TTSState, TTSServiceConfig, TTSOptions, DEFAULT_TTS_CONFIG } from './types';
 import { sanitizeForSpeech } from './sanitizeForSpeech';
+import { PronunciationService } from '@/services/pronunciation';
 
 class TTSServiceImpl {
   private config: TTSServiceConfig = DEFAULT_TTS_CONFIG;
@@ -92,7 +93,7 @@ class TTSServiceImpl {
 
     // Speak a cleaned copy (markdown/symbols/emoji removed) so they aren't read
     // aloud. The original text stays in currentText for the UI.
-    const spoken = this.normalizeForSpeech(sanitizeForSpeech(text));
+    const spoken = PronunciationService.toSpeechText(this.normalizeForSpeech(sanitizeForSpeech(text)));
     if (!spoken) return;
 
     if (this.currentState === 'speaking') {

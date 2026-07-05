@@ -157,6 +157,32 @@ class ConversationRepositoryImpl {
   async getConversationById(id: string): Promise<Conversation | null> {
     return this.memoryCache.find(c => c.id === id) || null;
   }
+
+  async getConversationStats(): Promise<{
+    conversationCount: number;
+    messageCount: number;
+    estimatedHoursSpent: number;
+    favoriteTopic: string;
+    lastConversationAt: string | null;
+  }> {
+    const conversations = await this.getAllConversations();
+    const messageCount = conversations.reduce((total, conversation) => total + conversation.messages.length, 0);
+    const userMessages = conversations.flatMap((conversation) => conversation.messages.filter((message) => message.role === 'user'));
+    const favoriteTopic = userMessages[0]?.content?.split(/\s+/).slice(0, 4).join(' ') || 'Still learning';
+    const lastConversationAt =
+      conversations
+        .map((conversation) => conversation.updatedAt)
+        .filter(Boolean)
+        .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ?? null;
+
+    return {
+      conversationCount: conversations.length,
+      messageCount,
+      estimatedHoursSpent: Math.round((messageCount * 1.5) / 60 * 10) / 10,
+      favoriteTopic,
+      lastConversationAt,
+    };
+  }
 }
 
 export const ConversationRepository = new ConversationRepositoryImpl();

@@ -4,6 +4,7 @@ import { ConversationRepository, Conversation } from '@/services/conversation';
 import { TTSService, TTSState } from '@/services/voice';
 import { ActionService, ActionResult } from '@/services/actions';
 import { SocialGreetingService } from '@/services/social';
+import { PersonalityService } from '@/services/personality';
 import { IntentResult, IntentType } from '@/engine/intentEngine';
 
 /** High-level assistant phase surfaced to the UI. */
@@ -181,10 +182,11 @@ export function useConversation(): UseConversationResult {
           const result = await ActionService.executeFromIntent(intent.intent, intent.query);
           setLastActionResult(result);
 
-          const replyText =
+          const baseReplyText =
             result.status === 'success'
               ? result.message
               : `I couldn't complete that action. ${result.error || result.message}`;
+          const replyText = PersonalityService.warmShortReply(baseReplyText);
 
           const assistantMessage = await ConversationRepository.addMessage({
             conversationId: currentConversation?.id || '',

@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { CalendarClock, Languages, MessageCircle, Sparkles } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { SpeechState } from '@/services/speech/types';
 import { TTSService } from '@/services/voice';
+import { ProactiveExperience, ProactiveSuggestion } from '@/services/proactive';
 import { AssistantState } from '@/hooks/useConversation';
 import { useConversationMode } from '@/hooks/useConversationMode';
 import { OrbState } from '@/components/orb/PlasmaOrb';
@@ -96,6 +97,7 @@ export default function HomeScreen() {
   const { width } = useWindowDimensions();
   const isWide = width >= WIDE_BREAKPOINT;
   const [talkOpen, setTalkOpen] = useState(false);
+  const [suggestion, setSuggestion] = useState<ProactiveSuggestion | null>(null);
 
   const openTopic = (text: string) => {
     setTalkOpen(true);
@@ -108,6 +110,43 @@ export default function HomeScreen() {
   const goHistory = () => router.push('/(tabs)/history' as never);
 
   const phase = computePhase(speechState, assistantState, isSupported);
+  const canSuggest = phase === 'idle' && !talkOpen;
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSuggestion = async () => {
+      if (!canSuggest) {
+        setSuggestion(null);
+        return;
+      }
+      const suggestions = await ProactiveExperience.getSuggestions({
+        userTalking: speechState === 'listening' || speechState === 'processing',
+        voiceActive: assistantState === 'thinking' || assistantState === 'speaking',
+      });
+      if (!cancelled) setSuggestion(suggestions[0] ?? null);
+    };
+    loadSuggestion();
+    return () => {
+      cancelled = true;
+    };
+  }, [assistantState, canSuggest, speechState, talkOpen]);
+
+  const acceptSuggestion = async () => {
+    if (!suggestion) return;
+    await ProactiveExperience.recordFeedback(suggestion, 'accepted');
+    setSuggestion(null);
+    if (suggestion.action.type === 'prompt') {
+      openTopic(suggestion.action.prompt);
+    } else if (suggestion.action.type === 'open_debug') {
+      router.push(suggestion.action.route as never);
+    }
+  };
+
+  const dismissSuggestion = async () => {
+    if (!suggestion) return;
+    await ProactiveExperience.recordFeedback(suggestion, 'ignored');
+    setSuggestion(null);
+  };
   const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')?.content ?? '';
   const voiceTranscript =
@@ -126,6 +165,10 @@ export default function HomeScreen() {
           <View style={styles.deskCenter}>
             <AppText style={[styles.hello, { color: theme.colors.accent }]}>Hello.</AppText>
             <AppText style={[styles.helloSub, { color: theme.colors.textMuted }]}>How can I help you today?</AppText>
+
+            {suggestion ? (
+              <ProactiveCard suggestion={suggestion} onAccept={acceptSuggestion} onDismiss={dismissSuggestion} />
+            ) : null}
 
             <View style={styles.cardRow}>
               {PROMPT_CARDS.map((card) => {
@@ -169,6 +212,12 @@ export default function HomeScreen() {
         />
       )}
 
+      {!isWide && suggestion ? (
+        <View style={styles.mobileSuggestion}>
+          <ProactiveCard suggestion={suggestion} onAccept={acceptSuggestion} onDismiss={dismissSuggestion} compact />
+        </View>
+      ) : null}
+
       {isWide ? (
         <VoiceOverlay
           visible={talkOpen}
@@ -190,6 +239,36 @@ export default function HomeScreen() {
   );
 }
 
+function ProactiveCard({
+  suggestion,
+  compact,
+  onAccept,
+  onDismiss,
+}: {
+  suggestion: ProactiveSuggestion;
+  compact?: boolean;
+  onAccept: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <GlassSurface intensity={24} radius={Radii.lg} style={[styles.proactiveCard, compact && styles.proactiveCompact]}>
+      <PressableScale onPress={onAccept} accessibilityRole="button" accessibilityLabel={suggestion.message} style={styles.proactiveMain}>
+        <AppText variant="bodyStrong" color="primary" numberOfLines={1}>
+          {suggestion.title}
+        </AppText>
+        <AppText variant="caption" color="muted" numberOfLines={compact ? 2 : 3}>
+          {suggestion.message}
+        </AppText>
+      </PressableScale>
+      <PressableScale onPress={onDismiss} accessibilityRole="button" accessibilityLabel="Dismiss suggestion" style={styles.dismissButton}>
+        <AppText variant="footnote" color="muted">
+          Not now
+        </AppText>
+      </PressableScale>
+    </GlassSurface>
+  );
+}
+
 const styles = StyleSheet.create({
   deskRoot: { flex: 1 },
   deskCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', maxWidth: 920, alignSelf: 'center', width: '100%' },
@@ -198,6 +277,11 @@ const styles = StyleSheet.create({
   cardRow: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.huge, width: '100%' },
   cardWrap: { flex: 1 },
   card: { padding: Spacing.lg, minHeight: 130, justifyContent: 'space-between' },
+  proactiveCard: { width: '100%', maxWidth: 620, marginTop: Spacing.xl, padding: Spacing.md, flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  proactiveCompact: { maxWidth: '100%', marginTop: 0 },
+  proactiveMain: { flex: 1, gap: Spacing.xs },
+  dismissButton: { minHeight: 40, paddingHorizontal: Spacing.md, alignItems: 'center', justifyContent: 'center' },
+  mobileSuggestion: { position: 'absolute', left: Spacing.gutter, right: Spacing.gutter, top: Spacing.xxl },
   cardIcon: {
     alignSelf: 'flex-end',
     width: 44,

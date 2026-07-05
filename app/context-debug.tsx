@@ -67,6 +67,7 @@ export default function ContextDebugScreen() {
           <GlassSurface intensity={26} radius={Radii.lg} style={styles.card}>
             <Line label="Conversation" value={context?.conversation?.topic ?? 'None'} />
             <Line label="Task" value={context?.task ? `${context.task.label} (${percent(context.task.confidence)})` : 'None'} />
+            <Line label="Emotion" value={context?.emotion ? `${context.emotion.state} (${percent(context.emotion.confidence)})` : 'Neutral'} />
             <Line label="Temporal" value={context ? `${context.temporal.dayPart}, ${context.temporal.isWeekend ? 'weekend' : 'workday'}` : 'Unknown'} />
             <Line label="Environment" value={context?.environment.network ?? 'unknown'} />
           </GlassSurface>

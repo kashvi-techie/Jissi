@@ -1,10 +1,12 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BehaviorEngine } from '@/services/behavior';
+import { EmotionEngine } from '@/services/emotion';
 import {
   ContextObject,
   ContextObservation,
   ContextState,
+  EmotionContext,
   EnvironmentContext,
   RelationshipContext,
   RelationshipType,
@@ -197,6 +199,12 @@ class ContextEngineImpl {
     ].slice(0, MAX_REFERENCES);
 
     await writeState(this.state);
+    await EmotionEngine.recordInteraction({
+      input,
+      intent,
+      taskType: nextTask?.type ?? this.state.task?.type,
+      taskConfidence: nextTask?.confidence ?? this.state.task?.confidence,
+    });
     return this.getCurrentContext();
   }
 
@@ -209,6 +217,7 @@ class ContextEngineImpl {
       updatedAt: nowIso(),
     };
     await writeState(this.state);
+    await EmotionEngine.recordAssistantResponse(response);
   }
 
   private upsertRelationship(observation: ContextObservation): void {
@@ -286,10 +295,12 @@ class ContextEngineImpl {
     await this.initialize();
     this.state = this.prune(this.state);
     const routine = await this.getRoutineContext();
+    const emotion = await this.getEmotionContext();
     const confidenceParts = [
       this.state.conversation?.confidence ?? 0,
       this.state.task?.confidence ?? 0,
       routine.confidence,
+      emotion.confidence,
       this.state.relationships[0]?.confidence ?? 0,
     ].filter((value) => value > 0);
     const confidence = confidenceParts.length
@@ -301,6 +312,7 @@ class ContextEngineImpl {
       task: this.state.task,
       relationships: this.state.relationships,
       routine,
+      emotion,
       environment: this.state.environment,
       temporal: temporalContext(),
       resolvedReferences: this.state.resolvedReferences,
@@ -318,6 +330,18 @@ class ContextEngineImpl {
     };
   }
 
+  private async getEmotionContext(): Promise<EmotionContext> {
+    const current = await EmotionEngine.getCurrentEmotion();
+    return {
+      state: current.state,
+      confidence: current.confidence,
+      reasons: current.reasons,
+      deliveryStyle: current.deliveryStyle,
+      wellbeingSuggestion: current.wellbeingSuggestion,
+      updatedAt: current.updatedAt,
+    };
+  }
+
   async buildPromptContext(userInput: string): Promise<string> {
     const context = await this.getCurrentContext();
     const compact = {
@@ -326,13 +350,19 @@ class ContextEngineImpl {
       task: context.task,
       relationships: context.relationships.slice(0, 5),
       routines: context.routine.active.slice(0, 3),
+      emotion: {
+        state: context.emotion.state,
+        confidence: context.emotion.confidence,
+        deliveryStyle: context.emotion.deliveryStyle,
+        wellbeingSuggestion: context.emotion.wellbeingSuggestion,
+      },
       environment: context.environment,
       resolvedReferences: context.resolvedReferences.slice(0, 5),
       confidence: context.confidence,
     };
 
     return [
-      'Current local context for JISSI. Use this privately to resolve pronouns, continuations, task context, relationship context, routines, and timing. Do not mention this context unless it helps the user.',
+      'Current local context for JISSI. Use this privately to resolve pronouns, continuations, task context, relationship context, routines, timing, and delivery style. Do not mention this context unless it helps the user. Raw emotion signals are never included here.',
       JSON.stringify(compact),
       `User message: ${userInput}`,
     ].join('\n\n');

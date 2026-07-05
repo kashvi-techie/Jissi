@@ -1,5 +1,6 @@
 import { IntentResult } from '@/engine/intentEngine';
 import { BehaviorPrediction } from '@/services/behavior';
+import { EmotionEstimate } from '@/services/emotion';
 
 export type TaskType = 'coding' | 'studying' | 'writing' | 'designing' | 'meeting' | 'browsing' | 'gaming' | 'unknown';
 export type RelationshipType =
@@ -56,6 +57,15 @@ export interface RoutineContext {
   updatedAt: string;
 }
 
+export interface EmotionContext {
+  state: EmotionEstimate['state'];
+  confidence: number;
+  reasons: string[];
+  deliveryStyle: string;
+  wellbeingSuggestion?: string;
+  updatedAt: string;
+}
+
 export interface EnvironmentContext {
   battery?: 'unknown' | 'charging' | 'discharging' | 'low' | 'full';
   network?: 'unknown' | 'online' | 'offline';
@@ -90,6 +100,7 @@ export interface ContextObject {
   task: TaskContext | null;
   relationships: RelationshipContext[];
   routine: RoutineContext;
+  emotion: EmotionContext;
   environment: EnvironmentContext;
   temporal: TemporalContext;
   resolvedReferences: ResolvedReference[];

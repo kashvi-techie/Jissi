@@ -6,6 +6,7 @@ import { ActionService, ActionResult } from '@/services/actions';
 import { SocialGreetingService } from '@/services/social';
 import { PersonalityService } from '@/services/personality';
 import { ContextEngine } from '@/services/context';
+import { PlannerEngine } from '@/services/planner';
 import { IntentResult, IntentType } from '@/engine/intentEngine';
 
 /** High-level assistant phase surfaced to the UI. */
@@ -179,6 +180,28 @@ export function useConversation(): UseConversationResult {
       }
 
       // ── Branch 1: device action ──────────────────────────────────────────
+      const plannerResult = await PlannerEngine.handleConversationInput(input);
+      if (plannerResult) {
+        setState('thinking');
+        try {
+          const replyText = PersonalityService.warmShortReply(plannerResult.reply);
+          const assistantMessage = await ConversationRepository.addMessage({
+            conversationId: currentConversation?.id || '',
+            role: 'assistant',
+            content: replyText,
+          });
+          setMessages((prev) => [...prev, assistantMessage]);
+          setLastResponse(replyText);
+          await ContextEngine.rememberAssistantResponse(replyText);
+          await TTSService.speak(replyText);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Planner failed');
+        } finally {
+          setState('idle');
+        }
+        return;
+      }
+
       if (intent && intent.intent !== 'unknown' && isActionIntent(intent.intent)) {
         setState('thinking');
         try {

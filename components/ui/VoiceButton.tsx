@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Mic } from 'lucide-react-native';
+import { Mic, Square, WifiOff, AlertTriangle } from 'lucide-react-native';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -15,7 +15,7 @@ import Animated, {
 import { PressableScale } from './PressableScale';
 import { useTheme } from '@/theme';
 
-export type VoiceButtonState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'disabled';
+export type VoiceButtonState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'tool_execution' | 'offline' | 'error' | 'disabled';
 
 interface VoiceButtonProps {
   state: VoiceButtonState;
@@ -34,7 +34,7 @@ interface VoiceButtonProps {
  */
 export function VoiceButton({ state, onPress, size = 96 }: VoiceButtonProps) {
   const theme = useTheme();
-  const disabled = state === 'disabled';
+  const disabled = state === 'disabled' || state === 'offline';
 
   const breathe = useSharedValue(0);
   const ripple1 = useSharedValue(0);
@@ -73,25 +73,25 @@ export function VoiceButton({ state, onPress, size = 96 }: VoiceButtonProps) {
     };
   }, [state, ripple1, ripple2]);
 
-  // Thinking rotation.
+  // Thinking / tool rotation.
   useEffect(() => {
-    if (state !== 'thinking') {
+    if (state !== 'thinking' && state !== 'tool_execution') {
       cancelAnimation(rotate);
       rotate.value = 0;
       return;
     }
-    rotate.value = withRepeat(withTiming(1, { duration: 3200, easing: Easing.linear }), -1, false);
+    rotate.value = withRepeat(withTiming(1, { duration: state === 'tool_execution' ? 2100 : 3200, easing: Easing.linear }), -1, false);
     return () => cancelAnimation(rotate);
   }, [state, rotate]);
 
   // Speaking pulse.
   useEffect(() => {
-    if (state !== 'speaking') {
+    if (state !== 'speaking' && state !== 'error') {
       cancelAnimation(pulse);
       pulse.value = 0;
       return;
     }
-    pulse.value = withRepeat(withTiming(1, { duration: 1500, easing: Easing.inOut(Easing.ease) }), -1, true);
+    pulse.value = withRepeat(withTiming(1, { duration: state === 'error' ? 760 : 1500, easing: Easing.inOut(Easing.ease) }), -1, true);
     return () => cancelAnimation(pulse);
   }, [state, pulse]);
 
@@ -128,7 +128,7 @@ export function VoiceButton({ state, onPress, size = 96 }: VoiceButtonProps) {
             style={[styles.ripple, { width: size, height: size, borderRadius: size / 2, borderColor: theme.colors.glow }, ripple2Style]}
           />
         )}
-        {state === 'thinking' && (
+        {(state === 'thinking' || state === 'tool_execution') && (
           <Animated.View
             style={[
               styles.thinkRing,
@@ -136,8 +136,8 @@ export function VoiceButton({ state, onPress, size = 96 }: VoiceButtonProps) {
                 width: thinkSize,
                 height: thinkSize,
                 borderRadius: thinkSize / 2,
-                borderTopColor: theme.colors.accent,
-                borderRightColor: theme.colors.accentAlt,
+                borderTopColor: state === 'tool_execution' ? '#FFBE5C' : theme.colors.accent,
+                borderRightColor: state === 'tool_execution' ? theme.colors.accent : theme.colors.accentAlt,
               },
               rotateStyle,
             ]}
@@ -148,9 +148,26 @@ export function VoiceButton({ state, onPress, size = 96 }: VoiceButtonProps) {
             colors={theme.gradients.accent}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={[styles.core, { width: size, height: size, borderRadius: size / 2, opacity: disabled ? 0.4 : 1 }]}
+            style={[
+              styles.core,
+              {
+                width: size,
+                height: size,
+                borderRadius: size / 2,
+                opacity: disabled ? 0.4 : 1,
+                backgroundColor: state === 'error' ? theme.colors.error : undefined,
+              },
+            ]}
           >
-            <Mic size={size * 0.32} color={theme.colors.textOnAccent} strokeWidth={2} />
+            {state === 'offline' || state === 'disabled' ? (
+              <WifiOff size={size * 0.3} color={theme.colors.textOnAccent} strokeWidth={2} />
+            ) : state === 'error' ? (
+              <AlertTriangle size={size * 0.3} color={theme.colors.textOnAccent} strokeWidth={2} />
+            ) : state === 'listening' || state === 'speaking' || state === 'thinking' || state === 'tool_execution' ? (
+              <Square size={size * 0.26} color={theme.colors.textOnAccent} fill={theme.colors.textOnAccent} strokeWidth={2} />
+            ) : (
+              <Mic size={size * 0.32} color={theme.colors.textOnAccent} strokeWidth={2} />
+            )}
           </LinearGradient>
         </Animated.View>
       </View>

@@ -3,6 +3,9 @@ import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { ArrowLeft, MessageSquare, Search, X } from 'lucide-react-native';
 import { OrbEngine } from '@/components/orb/OrbEngine';
 import { OrbState } from '@/components/orb/PlasmaOrb';
+import { ConversationTimeline } from '@/components/ConversationTimeline';
+import { VoiceWave } from '@/components/VoiceWave';
+import { AIMessage } from '@/services/ai';
 import { AppText, CircleButton, PressableScale, VoiceButton, VoiceButtonState } from '@/components/ui';
 import { useTheme } from '@/theme';
 import { Fonts } from '@/theme/typography';
@@ -14,6 +17,7 @@ export interface TalkViewProps {
   /** Short status line under the top bar ("Listening…", "Thinking…"). */
   status: string;
   transcript: string;
+  messages?: AIMessage[];
   onMic: () => void;
   /** Stop the current turn (the ✕) WITHOUT leaving the conversation. */
   onStop: () => void;
@@ -29,10 +33,13 @@ export interface TalkViewProps {
  * the conversation handlers and owns no logic. Used inline as the mobile screen and
  * inside a Modal (VoiceOverlay) on desktop.
  */
-export function TalkView({ orbState, voiceState, status, transcript, onMic, onStop, onBack, onMessage }: TalkViewProps) {
+export function TalkView({ orbState, voiceState, status, transcript, messages = [], onMic, onStop, onBack, onMessage }: TalkViewProps) {
   const theme = useTheme();
   const { width } = useWindowDimensions();
   const orbSize = Math.round(Math.min(width * 0.58, 300));
+  const isActive = orbState === 'listening' || orbState === 'speaking' || orbState === 'tool_execution';
+  const isThinking = orbState === 'thinking' || orbState === 'tool_execution';
+  const waveIntensity = orbState === 'speaking' ? 1.25 : orbState === 'listening' ? 0.9 : 0.65;
 
   return (
     <View style={styles.root}>
@@ -57,12 +64,16 @@ export function TalkView({ orbState, voiceState, status, transcript, onMic, onSt
 
       {/* Orb + transcript */}
       <View style={styles.body}>
-        <OrbEngine state={orbState} size={orbSize} />
+        <View style={styles.orbStage} accessibilityLabel={`Assistant state: ${status}`}>
+          <VoiceWave active={isActive} size={orbSize} intensity={waveIntensity} />
+          <OrbEngine state={orbState} size={orbSize} />
+        </View>
         {transcript ? (
           <AppText color="primary" style={styles.transcript}>
             {transcript}
           </AppText>
         ) : null}
+        <ConversationTimeline messages={messages} thinking={isThinking} />
       </View>
 
       {/* Dock: search · mic · close */}
@@ -100,7 +111,8 @@ const styles = StyleSheet.create({
   },
   status: { textAlign: 'center', marginTop: Spacing.sm },
 
-  body: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.xxl, paddingBottom: 26 },
+  body: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.xl, paddingBottom: 22 },
+  orbStage: { alignItems: 'center', justifyContent: 'center' },
   transcript: {
     textAlign: 'center',
     fontFamily: Fonts.bodyMedium,

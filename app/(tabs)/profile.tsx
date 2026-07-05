@@ -63,6 +63,7 @@ export default function ProfileScreen() {
     favoriteTopic: 'Still learning',
     lastConversationAt: null,
   });
+  const [loading, setLoading] = useState(true);
 
   useFocusEffect(
     useCallback(() => {
@@ -74,6 +75,7 @@ export default function ProfileScreen() {
         ]);
         if (cancelled) return;
         setStats({ ...conversationStats, memoriesStored });
+        setLoading(false);
       };
 
       load();
@@ -102,12 +104,20 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        <View style={styles.statsGrid}>
-          <StatCard label="Conversations" value={String(stats.conversationCount)} />
-          <StatCard label="Hours spent" value={`${stats.estimatedHoursSpent}h`} />
-          <StatCard label="Memories stored" value={String(stats.memoriesStored)} />
-          <StatCard label="Current version" value={version} />
-        </View>
+        {loading ? (
+          <View style={styles.statsGrid}>
+            {[0, 1, 2, 3].map((item) => (
+              <SkeletonCard key={item} />
+            ))}
+          </View>
+        ) : (
+          <View style={styles.statsGrid}>
+            <StatCard label="Conversations" value={String(stats.conversationCount)} />
+            <StatCard label="Hours spent" value={`${stats.estimatedHoursSpent}h`} />
+            <StatCard label="Memories stored" value={String(stats.memoriesStored)} />
+            <StatCard label="Current version" value={version} />
+          </View>
+        )}
 
         <GlassSurface intensity={36} radius={Radii.xl} strong style={styles.panel}>
           <View style={styles.panelRow}>
@@ -189,6 +199,16 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+function SkeletonCard() {
+  const theme = useTheme();
+  return (
+    <GlassSurface intensity={24} radius={Radii.lg} style={styles.statCard}>
+      <View style={[styles.skeletonLineWide, { backgroundColor: theme.colors.fill }]} />
+      <View style={[styles.skeletonLine, { backgroundColor: theme.colors.fill }]} />
+    </GlassSurface>
+  );
+}
+
 function SettingRow({
   title,
   detail,
@@ -228,6 +248,8 @@ const styles = StyleSheet.create({
   badge: { width: 72, height: 72, alignItems: 'center', justifyContent: 'center' },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.md },
   statCard: { width: '47.8%', minHeight: 94, justifyContent: 'center', gap: Spacing.sm, padding: Spacing.lg },
+  skeletonLineWide: { width: '56%', height: 22, borderRadius: 12 },
+  skeletonLine: { width: '76%', height: 12, borderRadius: 8 },
   panel: { padding: Spacing.lg, gap: Spacing.lg },
   panelRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   panelText: { flex: 1, gap: Spacing.xs },

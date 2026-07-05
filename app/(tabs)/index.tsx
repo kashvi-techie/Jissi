@@ -15,36 +15,35 @@ import { useTheme } from '@/theme';
 import { Fonts } from '@/theme/typography';
 import { Radii, Spacing } from '@/theme/tokens';
 
-/**
- * HOME — voice-first on mobile (orb + status + pills + mic dock), Gemini-style on
- * desktop ("Hello." + prompt cards + floating input dock). A session starts via
- * the existing useConversationMode; while active the full-screen VoiceOverlay
- * takes over. No business logic / navigation changed.
- */
-
 const WIDE_BREAKPOINT = 900;
 
-type Phase = 'idle' | 'listening' | 'processing' | 'thinking' | 'speaking' | 'error';
+type Phase = 'idle' | 'listening' | 'processing' | 'thinking' | 'speaking' | 'tool_execution' | 'offline' | 'error';
 
-function computePhase(s: SpeechState, a: AssistantState): Phase {
+function computePhase(s: SpeechState, a: AssistantState, supported: boolean): Phase {
+  if (!supported) return 'offline';
   if (s === 'error') return 'error';
   if (a === 'thinking') return 'thinking';
   if (a === 'speaking') return 'speaking';
   if (s === 'listening') return 'listening';
-  if (s === 'processing') return 'processing';
+  if (s === 'processing') return 'tool_execution';
   return 'idle';
 }
 
 function phaseToOrb(p: Phase): OrbState {
   if (p === 'listening') return 'listening';
+  if (p === 'tool_execution') return 'tool_execution';
+  if (p === 'offline') return 'offline';
+  if (p === 'error') return 'error';
   if (p === 'thinking' || p === 'processing') return 'thinking';
   if (p === 'speaking') return 'speaking';
   return 'idle';
 }
 
 function phaseToVoice(p: Phase, supported: boolean): VoiceButtonState {
-  if (!supported) return 'disabled';
+  if (!supported || p === 'offline') return 'offline';
   if (p === 'listening') return 'listening';
+  if (p === 'tool_execution') return 'tool_execution';
+  if (p === 'error') return 'error';
   if (p === 'thinking' || p === 'processing') return 'thinking';
   if (p === 'speaking') return 'speaking';
   return 'idle';
@@ -53,13 +52,17 @@ function phaseToVoice(p: Phase, supported: boolean): VoiceButtonState {
 function statusShort(p: Phase, supported: boolean): string {
   if (!supported) return 'Unavailable here';
   switch (p) {
+    case 'offline':
+      return 'Offline';
     case 'listening':
-      return 'Listening…';
+      return 'Listening...';
+    case 'tool_execution':
+      return 'Using tools...';
     case 'thinking':
     case 'processing':
-      return 'Thinking…';
+      return 'Thinking...';
     case 'speaking':
-      return 'Speaking…';
+      return 'Speaking...';
     case 'error':
       return 'Try again';
     default:
@@ -92,10 +95,8 @@ export default function HomeScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const isWide = width >= WIDE_BREAKPOINT;
-
-  // Desktop only: whether the talk overlay is open. Decoupled from the session so
-  // "stop" pauses the turn without closing the conversation; only "back" closes.
   const [talkOpen, setTalkOpen] = useState(false);
+
   const openTopic = (text: string) => {
     setTalkOpen(true);
     sendPrompt(text);
@@ -106,8 +107,7 @@ export default function HomeScreen() {
   };
   const goHistory = () => router.push('/(tabs)/history' as never);
 
-  const phase = computePhase(speechState, assistantState);
-
+  const phase = computePhase(speechState, assistantState, isSupported);
   const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')?.content ?? '';
   const voiceTranscript =
@@ -115,33 +115,32 @@ export default function HomeScreen() {
       ? interimTranscript || transcript || lastUser
       : phase === 'speaking'
         ? lastAssistant
-        : phase === 'thinking' || phase === 'processing'
+        : phase === 'thinking' || phase === 'processing' || phase === 'tool_execution'
           ? lastUser
           : error || lastAssistant || lastUser;
 
   return (
     <Screen>
       {isWide ? (
-        /* ── Desktop: Gemini-style landing ─────────────────────────────── */
         <View style={styles.deskRoot}>
           <View style={styles.deskCenter}>
             <AppText style={[styles.hello, { color: theme.colors.accent }]}>Hello.</AppText>
             <AppText style={[styles.helloSub, { color: theme.colors.textMuted }]}>How can I help you today?</AppText>
 
             <View style={styles.cardRow}>
-              {PROMPT_CARDS.map((c) => {
-                const Icon = c.icon;
+              {PROMPT_CARDS.map((card) => {
+                const Icon = card.icon;
                 return (
                   <PressableScale
-                    key={c.text}
-                    onPress={() => openTopic(c.text)}
+                    key={card.text}
+                    onPress={() => openTopic(card.text)}
                     accessibilityRole="button"
-                    accessibilityLabel={c.text}
+                    accessibilityLabel={card.text}
                     style={styles.cardWrap}
                   >
                     <GlassSurface intensity={18} radius={Radii.lg} style={styles.card}>
                       <AppText variant="callout" color="secondary" numberOfLines={3}>
-                        {c.text}
+                        {card.text}
                       </AppText>
                       <View style={styles.cardIcon}>
                         <Icon size={16} color={theme.colors.textSecondary} strokeWidth={1.8} />
@@ -154,14 +153,14 @@ export default function HomeScreen() {
           </View>
         </View>
       ) : (
-        /* ── Mobile: direct talk (no home) ─────────────────────────────── */
         <TalkView
           orbState={phaseToOrb(phase)}
           voiceState={phaseToVoice(phase, isSupported)}
           status={statusShort(phase, isSupported)}
           transcript={voiceTranscript}
+          messages={messages}
           onMic={() => {
-            TTSService.unlockWeb(); // unlock web speech synthesis inside the user gesture
+            TTSService.unlockWeb();
             if (isSupported) toggle();
           }}
           onStop={stop}
@@ -170,7 +169,6 @@ export default function HomeScreen() {
         />
       )}
 
-      {/* Desktop: talk overlays the landing. Stop pauses the turn; back closes it. */}
       {isWide ? (
         <VoiceOverlay
           visible={talkOpen}
@@ -178,6 +176,7 @@ export default function HomeScreen() {
           voiceState={phaseToVoice(phase, isSupported)}
           status={statusShort(phase, isSupported)}
           transcript={voiceTranscript}
+          messages={messages}
           onMic={() => {
             TTSService.unlockWeb();
             toggle();
@@ -192,13 +191,20 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  // Desktop
   deskRoot: { flex: 1 },
   deskCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', maxWidth: 920, alignSelf: 'center', width: '100%' },
-  hello: { fontFamily: Fonts.bodyBold, fontSize: 46, lineHeight: 54, letterSpacing: -1 },
-  helloSub: { fontFamily: Fonts.bodyBold, fontSize: 40, lineHeight: 48, letterSpacing: -0.8 },
+  hello: { fontFamily: Fonts.bodyBold, fontSize: 46, lineHeight: 54, letterSpacing: 0 },
+  helloSub: { fontFamily: Fonts.bodyBold, fontSize: 40, lineHeight: 48, letterSpacing: 0 },
   cardRow: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.huge, width: '100%' },
   cardWrap: { flex: 1 },
   card: { padding: Spacing.lg, minHeight: 130, justifyContent: 'space-between' },
-  cardIcon: { alignSelf: 'flex-end', width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.05)' },
+  cardIcon: {
+    alignSelf: 'flex-end',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
 });

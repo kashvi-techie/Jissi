@@ -12,18 +12,21 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useTheme } from '@/theme';
 
-export type OrbState = 'idle' | 'listening' | 'thinking' | 'speaking';
+export type OrbState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'tool_execution' | 'offline' | 'error';
 
 interface PlasmaOrbProps {
   state?: OrbState;
   size?: number;
 }
 
-const CONFIG: Record<OrbState, { breath: number; scaleAmt: number; rot: number; glow: number }> = {
-  idle: { breath: 7200, scaleAmt: 0.02, rot: 52000, glow: 0.42 },
-  listening: { breath: 3400, scaleAmt: 0.034, rot: 34000, glow: 0.72 },
-  thinking: { breath: 4800, scaleAmt: 0.026, rot: 42000, glow: 0.58 },
-  speaking: { breath: 2500, scaleAmt: 0.04, rot: 28000, glow: 0.82 },
+const CONFIG: Record<OrbState, { breath: number; scaleAmt: number; rot: number; glow: number; glowColor: string }> = {
+  idle: { breath: 7200, scaleAmt: 0.018, rot: 54000, glow: 0.36, glowColor: 'rgba(38,132,255,0.14)' },
+  listening: { breath: 3200, scaleAmt: 0.036, rot: 30000, glow: 0.74, glowColor: 'rgba(28,180,255,0.22)' },
+  thinking: { breath: 4600, scaleAmt: 0.026, rot: 38000, glow: 0.6, glowColor: 'rgba(154,95,255,0.2)' },
+  speaking: { breath: 1800, scaleAmt: 0.052, rot: 24000, glow: 0.86, glowColor: 'rgba(45,145,255,0.24)' },
+  tool_execution: { breath: 2600, scaleAmt: 0.032, rot: 20000, glow: 0.78, glowColor: 'rgba(255,190,92,0.2)' },
+  offline: { breath: 8200, scaleAmt: 0.01, rot: 68000, glow: 0.2, glowColor: 'rgba(120,120,128,0.12)' },
+  error: { breath: 1200, scaleAmt: 0.038, rot: 18000, glow: 0.72, glowColor: 'rgba(255,78,104,0.22)' },
 };
 
 const VB = 240;
@@ -70,7 +73,7 @@ export function PlasmaOrb({ state = 'idle', size = 220 }: PlasmaOrbProps) {
   return (
     <View style={[styles.wrap, { width: box, height: box }]} pointerEvents="none">
       <Animated.View style={[styles.center, floatStyle]}>
-        <Animated.View style={[styles.glow, { width: box, height: box, opacity: glowOpacity }, sphereStyle]} />
+        <Animated.View style={[styles.glow, { width: box, height: box, opacity: glowOpacity, backgroundColor: CONFIG[state].glowColor }, sphereStyle]} />
         <Animated.View style={[styles.center, { width: size, height: size }, sphereStyle]}>
           <Svg width={size} height={size} viewBox={`0 0 ${VB} ${VB}`}>
             <Defs>

@@ -4,6 +4,7 @@ import { useSpeechRecognition } from './useSpeechRecognition';
 import { useConversation, AssistantState } from './useConversation';
 import { SpeechState } from '@/services/speech/types';
 import { AIMessage } from '@/services/ai';
+import { HapticsService } from '@/services/haptics';
 
 /**
  * Continuous Conversation Mode.
@@ -105,6 +106,7 @@ export function useConversationMode(): UseConversationModeResult {
   const beginListening = useCallback(() => {
     prevTranscriptRef.current = '';
     clearTranscript();
+    HapticsService.play('listen_start');
     startListening();
   }, [clearTranscript, startListening]);
 
@@ -114,6 +116,7 @@ export function useConversationMode(): UseConversationModeResult {
     clearTimer();
     stopListening();
     stopSpeaking();
+    HapticsService.play('listen_stop');
   }, [clearTimer, stopListening, stopSpeaking]);
 
   const startConversation = useCallback(() => {
@@ -182,6 +185,7 @@ export function useConversationMode(): UseConversationModeResult {
     prevAssistantRef.current = assistantState;
     if (!isActiveRef.current) return;
     if (prev !== 'idle' && assistantState === 'idle') {
+      if (prev === 'speaking') HapticsService.play('reply');
       scheduleRestart(RESTART_DELAY_MS);
     }
   }, [assistantState, scheduleRestart]);
@@ -192,6 +196,7 @@ export function useConversationMode(): UseConversationModeResult {
     if (speechState !== 'error' || !speechError) return;
 
     if (/permission|denied|not-allowed/i.test(speechError)) {
+      HapticsService.play('error');
       stopConversation(); // fatal — needs user action, don't loop
       return;
     }
@@ -201,6 +206,7 @@ export function useConversationMode(): UseConversationModeResult {
     if (!benignSilence) {
       errorCountRef.current += 1;
       if (errorCountRef.current > MAX_CONSECUTIVE_ERRORS) {
+        HapticsService.play('error');
         stopConversation();
         return;
       }

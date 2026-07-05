@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { memo, useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AIMessage } from '@/services/ai';
@@ -17,7 +17,7 @@ function formatTime(ts: number): string {
   return `${h}:${m}`;
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message }: MessageBubbleProps) {
   const theme = useTheme();
   const isUser = message.role === 'user';
 
@@ -71,7 +71,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       </View>
     </Animated.View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', marginVertical: Spacing.xs },

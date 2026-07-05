@@ -179,13 +179,25 @@ const INTENSITY: Record<OrbState, number> = {
   listening: 0.68,
   thinking: 0.54,
   speaking: 0.88,
+  tool_execution: 0.76,
+  offline: 0.12,
+  error: 0.7,
 };
 
 const BREATH: Record<OrbState, { dur: number; amt: number }> = {
-  idle: { dur: 7200, amt: 0.02 },
-  listening: { dur: 3400, amt: 0.034 },
+  idle: { dur: 7200, amt: 0.018 },
+  listening: { dur: 3200, amt: 0.036 },
   thinking: { dur: 4800, amt: 0.026 },
-  speaking: { dur: 2500, amt: 0.04 },
+  speaking: { dur: 1800, amt: 0.052 },
+  tool_execution: { dur: 2600, amt: 0.032 },
+  offline: { dur: 8200, amt: 0.01 },
+  error: { dur: 1200, amt: 0.038 },
+};
+
+const STATE_COLORS: Partial<Record<OrbState, { deep: [number, number, number]; mid: [number, number, number]; hot: [number, number, number] }>> = {
+  tool_execution: { deep: [0.16, 0.08, 0.01], mid: [1, 0.56, 0.18], hot: [1, 0.86, 0.5] },
+  offline: { deep: [0.025, 0.026, 0.033], mid: [0.28, 0.31, 0.38], hot: [0.64, 0.68, 0.76] },
+  error: { deep: [0.16, 0.02, 0.045], mid: [1, 0.16, 0.34], hot: [1, 0.68, 0.78] },
 };
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -200,6 +212,7 @@ function OrbSkia({ state = 'idle', size = 260 }: OrbProps) {
   const colDeep = useMemo(() => hexToRgb(deep), [deep]);
   const colMid = useMemo(() => hexToRgb(mid), [mid]);
   const colHot = useMemo(() => hexToRgb(light), [light]);
+  const stateColors = STATE_COLORS[state];
   const effect = useMemo(() => Skia.RuntimeEffect.Make(SKSL), []);
 
   const clock = useClock();
@@ -224,9 +237,9 @@ function OrbSkia({ state = 'idle', size = 260 }: OrbProps) {
     u_res: [size, size],
     u_time: clock.value / 1000,
     u_intensity: intensity.value,
-    u_deep: colDeep,
-    u_mid: colMid,
-    u_hot: colHot,
+    u_deep: stateColors?.deep ?? colDeep,
+    u_mid: stateColors?.mid ?? colMid,
+    u_hot: stateColors?.hot ?? colHot,
   }));
 
   const wrapStyle = useAnimatedStyle(() => ({

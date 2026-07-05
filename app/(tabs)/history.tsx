@@ -45,13 +45,17 @@ export default function HistoryScreen() {
   const isWide = width >= 900;
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
       const load = async () => {
         const next = await ConversationRepository.getAllConversations();
-        if (!cancelled) setConversations(next);
+        if (!cancelled) {
+          setConversations(next);
+          setLoading(false);
+        }
       };
       load();
       return () => {
@@ -104,7 +108,13 @@ export default function HistoryScreen() {
           />
         </GlassSurface>
 
-        {filtered.length === 0 ? (
+        {loading ? (
+          <View style={styles.list}>
+            {[0, 1, 2].map((item) => (
+              <HistorySkeleton key={item} />
+            ))}
+          </View>
+        ) : filtered.length === 0 ? (
           <GlassSurface intensity={34} radius={Radii.xl} style={styles.empty}>
             <MessageCircle size={26} color={theme.colors.textMuted} strokeWidth={1.6} />
             <AppText variant="bodyStrong" color="primary">
@@ -152,6 +162,17 @@ export default function HistoryScreen() {
   );
 }
 
+function HistorySkeleton() {
+  const theme = useTheme();
+  return (
+    <GlassSurface intensity={24} radius={Radii.lg} style={styles.card}>
+      <View style={[styles.skeletonTitle, { backgroundColor: theme.colors.fill }]} />
+      <View style={[styles.skeletonLine, { backgroundColor: theme.colors.fill }]} />
+      <View style={[styles.skeletonShort, { backgroundColor: theme.colors.fill }]} />
+    </GlassSurface>
+  );
+}
+
 const styles = StyleSheet.create({
   content: { paddingHorizontal: Spacing.gutter, paddingTop: Spacing.xxxl, paddingBottom: 120, gap: Spacing.lg },
   contentWide: { maxWidth: 820, alignSelf: 'center', width: '100%' },
@@ -167,4 +188,7 @@ const styles = StyleSheet.create({
   card: { padding: Spacing.lg, gap: Spacing.sm },
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   cardTitle: { flex: 1 },
+  skeletonTitle: { width: '58%', height: 18, borderRadius: 9 },
+  skeletonLine: { width: '86%', height: 12, borderRadius: 8 },
+  skeletonShort: { width: '34%', height: 10, borderRadius: 7 },
 });

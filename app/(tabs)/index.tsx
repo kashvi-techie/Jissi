@@ -6,6 +6,7 @@ import type { LucideIcon } from 'lucide-react-native';
 import { SpeechState } from '@/services/speech/types';
 import { TTSService } from '@/services/voice';
 import { ProactiveExperience, ProactiveSuggestion } from '@/services/proactive';
+import { OnboardingService } from '@/services/onboarding';
 import { AssistantState } from '@/hooks/useConversation';
 import { useConversationMode } from '@/hooks/useConversationMode';
 import { OrbState } from '@/components/orb/PlasmaOrb';
@@ -111,6 +112,20 @@ export default function HomeScreen() {
 
   const phase = computePhase(speechState, assistantState, isSupported);
   const canSuggest = phase === 'idle' && !talkOpen;
+
+  useEffect(() => {
+    let cancelled = false;
+    const checkOnboarding = async () => {
+      const complete = await OnboardingService.isComplete();
+      if (!cancelled && !complete) {
+        router.replace('/onboarding' as never);
+      }
+    };
+    checkOnboarding();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   useEffect(() => {
     let cancelled = false;

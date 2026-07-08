@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native'
 import Constants from 'expo-constants';
 import {
   Bell,
+  BookOpen,
   Brain,
   Clock,
   Lock,
@@ -157,6 +158,23 @@ export default function ProfileScreen() {
             </AppText>
             <AppText variant="bodyStrong" color="accent">
               {mode === 'dark' ? 'Dark' : 'Light'}
+            </AppText>
+          </GlassSurface>
+        </PressableScale>
+
+        <PressableScale onPress={() => router.push('/timeline' as never)} accessibilityRole="button" accessibilityLabel="Open timeline">
+          <GlassSurface intensity={36} radius={Radii.lg} style={styles.row}>
+            <BookOpen size={20} color={theme.colors.textSecondary} strokeWidth={1.8} />
+            <View style={styles.panelText}>
+              <AppText variant="bodyStrong" color="primary">
+                Timeline
+              </AppText>
+              <AppText variant="caption" color="muted">
+                Your goals, habits, people and memories in one journey.
+              </AppText>
+            </View>
+            <AppText variant="bodyStrong" color="accent">
+              Open
             </AppText>
           </GlassSurface>
         </PressableScale>

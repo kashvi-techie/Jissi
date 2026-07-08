@@ -27,6 +27,7 @@ export type ConversationMode = 'idle' | 'listening' | 'processing' | 'speaking' 
 const RESTART_DELAY_MS = 600;
 /** Backoff before retrying after a recoverable STT failure. */
 const RECOVERY_DELAY_MS = 800;
+const MAX_RECOVERY_DELAY_MS = 3200;
 /** Give up the loop after this many consecutive non-silence failures. */
 const MAX_CONSECUTIVE_ERRORS = 3;
 
@@ -95,6 +96,7 @@ export function useConversationMode(): UseConversationModeResult {
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorCountRef = useRef(0);
   const sessionStartRef = useRef<number | null>(null);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 
   const clearTimer = useCallback(() => {
     if (restartTimerRef.current) {
@@ -180,7 +182,7 @@ export function useConversationMode(): UseConversationModeResult {
       clearTimer();
       restartTimerRef.current = setTimeout(() => {
         restartTimerRef.current = null;
-        if (isActiveRef.current) beginListening();
+        if (isActiveRef.current && appStateRef.current === 'active') beginListening();
       }, delay);
     },
     [clearTimer, beginListening]
@@ -243,12 +245,16 @@ export function useConversationMode(): UseConversationModeResult {
         return;
       }
     }
-    scheduleRestart(RECOVERY_DELAY_MS);
+    const delay = benignSilence
+      ? RECOVERY_DELAY_MS
+      : Math.min(MAX_RECOVERY_DELAY_MS, RECOVERY_DELAY_MS * Math.max(1, errorCountRef.current));
+    scheduleRestart(delay);
   }, [speechState, speechError, scheduleRestart, stopConversation]);
 
   // ── AppState: leaving the foreground safely halts the loop.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      appStateRef.current = next;
       if (next !== 'active' && isActiveRef.current) {
         stopConversation();
       }

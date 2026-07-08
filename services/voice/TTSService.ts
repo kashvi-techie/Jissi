@@ -11,6 +11,7 @@ class TTSServiceImpl {
   private stateListeners: Set<(state: TTSState) => void> = new Set();
   private currentText: string = '';
   private isAvailable: boolean = true;
+  private speakToken = 0;
 
   /** Conversational voice defaults — a touch slower and slightly brighter reads
    *  warmer / less robotic than a flat 1.0 / 1.0. */
@@ -90,6 +91,7 @@ class TTSServiceImpl {
     }
 
     this.currentText = text;
+    const token = ++this.speakToken;
 
     // Speak a cleaned copy (markdown/symbols/emoji removed) so they aren't read
     // aloud. The original text stays in currentText for the UI.
@@ -133,6 +135,12 @@ class TTSServiceImpl {
       let safety: ReturnType<typeof setTimeout> | null = null;
       const finish = (errored: boolean, errMsg?: string) => {
         if (settled) return;
+        if (token !== this.speakToken) {
+          settled = true;
+          if (safety) clearTimeout(safety);
+          resolve();
+          return;
+        }
         settled = true;
         if (safety) clearTimeout(safety);
         this.setState(errored ? 'error' : 'idle');
@@ -207,11 +215,17 @@ class TTSServiceImpl {
    *  when it ends, errors, or a length-scaled safety timeout fires — so the
    *  caller's `await` never hangs even if the browser drops the end event. */
   private speakWeb(text: string, options?: TTSOptions): Promise<void> {
+    const token = this.speakToken;
     return new Promise((resolve) => {
       const synth = window.speechSynthesis;
       let settled = false;
       const finish = (errored: boolean) => {
         if (settled) return;
+        if (token !== this.speakToken) {
+          settled = true;
+          resolve();
+          return;
+        }
         settled = true;
         this.setState(errored ? 'error' : 'idle');
         if (errored) options?.onError?.('TTS error');
@@ -253,7 +267,12 @@ class TTSServiceImpl {
 
   async stop(): Promise<void> {
     try {
-      await Speech.stop();
+      this.speakToken += 1;
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      } else {
+        await Speech.stop();
+      }
       this.setState('idle');
       this.currentText = '';
     } catch (error) {

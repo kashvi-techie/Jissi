@@ -79,11 +79,21 @@ class SpeechServiceImpl {
   private subscriptions: EventSub[] = [];
   private appStateSub: EventSub | null = null;
   private stopWaiter: (() => void) | null = null;
+  private startFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private startInFlight = false;
+  private stopInFlight = false;
+  private startToken = 0;
 
   private resolveStopWaiter(): void {
     const resolve = this.stopWaiter;
     this.stopWaiter = null;
     resolve?.();
+  }
+
+  private clearStartFallback(): void {
+    if (!this.startFallbackTimer) return;
+    clearTimeout(this.startFallbackTimer);
+    this.startFallbackTimer = null;
   }
 
   private async prepareAudioForRecognition(): Promise<void> {
@@ -136,11 +146,14 @@ class SpeechServiceImpl {
     this.webRecognition.maxAlternatives = 1;
 
     this.webRecognition.onstart = () => {
+      this.startInFlight = false;
       this.isListening = true;
       this.callbacks.onSpeechStart?.();
     };
 
     this.webRecognition.onend = () => {
+      this.startInFlight = false;
+      this.stopInFlight = false;
       this.isListening = false;
       this.callbacks.onSpeechEnd?.();
     };
@@ -168,6 +181,8 @@ class SpeechServiceImpl {
     };
 
     this.webRecognition.onerror = (event: any) => {
+      this.startInFlight = false;
+      this.stopInFlight = false;
       this.callbacks.onSpeechError?.(event.error);
     };
   }
@@ -185,10 +200,15 @@ class SpeechServiceImpl {
     };
 
     add<null>('start', () => {
+      this.clearStartFallback();
+      this.startInFlight = false;
       this.isListening = true;
       this.callbacks.onSpeechStart?.();
     });
     add<null>('end', () => {
+      this.clearStartFallback();
+      this.startInFlight = false;
+      this.stopInFlight = false;
       this.isListening = false;
       this.resolveStopWaiter();
       this.callbacks.onSpeechEnd?.();
@@ -203,6 +223,9 @@ class SpeechServiceImpl {
       }
     });
     add<ExpoSpeechRecognitionErrorEvent>('error', (ev) => {
+      this.clearStartFallback();
+      this.startInFlight = false;
+      this.stopInFlight = false;
       this.isListening = false;
       this.resolveStopWaiter();
       this.callbacks.onSpeechError?.(ev.message || ev.error || 'Unknown speech error');
@@ -256,12 +279,19 @@ class SpeechServiceImpl {
       throw new Error('SpeechService not initialized. Call initialize() first.');
     }
 
-    // Hard guard against duplicate starts; set synchronously to close the race
-    // window where two rapid calls both pass the guard.
-    if (this.isListening) {
+    if (Platform.OS !== 'web' && AppState.currentState !== 'active') {
+      this.callbacks.onSpeechError?.('app-in-background: microphone can start only while the app is active.');
       return;
     }
+
+    // Hard guard against duplicate starts; set synchronously to close the race
+    // window where two rapid calls both pass the guard.
+    if (this.isListening || this.startInFlight) {
+      return;
+    }
+    this.startInFlight = true;
     this.isListening = true;
+    const token = ++this.startToken;
 
     try {
       await this.prepareAudioForRecognition();
@@ -279,18 +309,35 @@ class SpeechServiceImpl {
         const granted = await this.ensureNativePermission();
         if (!granted) {
           this.isListening = false;
+          this.startInFlight = false;
           this.callbacks.onSpeechError?.('not-allowed: microphone or speech permission was denied.');
           return;
         }
+        if (!ExpoSpeechRecognition.isRecognitionAvailable()) {
+          this.isListening = false;
+          this.startInFlight = false;
+          this.callbacks.onSpeechError?.('Speech recognition is not available on this device.');
+          return;
+        }
         ExpoSpeechRecognition.start({ lang: locale, interimResults: true, continuous: false });
+        this.clearStartFallback();
+        this.startFallbackTimer = setTimeout(() => {
+          if (this.startToken === token && this.isListening && this.startInFlight) {
+            this.startInFlight = false;
+            this.callbacks.onSpeechStart?.();
+          }
+        }, 900);
       } else {
         // Unsupported runtime (e.g. Expo Go without the native module): fail
         // gracefully — never throw a runtime error.
         this.isListening = false;
+        this.startInFlight = false;
         this.callbacks.onSpeechError?.('Speech recognition is not available on this device.');
         return;
       }
     } catch (error) {
+      this.clearStartFallback();
+      this.startInFlight = false;
       this.isListening = false;
       const message = error instanceof Error ? error.message : 'Failed to start listening';
       this.callbacks.onSpeechError?.(message);
@@ -299,7 +346,8 @@ class SpeechServiceImpl {
   }
 
   async stopListening(): Promise<void> {
-    if (!this.isListening) return;
+    if (!this.isListening || this.stopInFlight) return;
+    this.stopInFlight = true;
 
     try {
       if (Platform.OS === 'web') {
@@ -316,8 +364,14 @@ class SpeechServiceImpl {
         ExpoSpeechRecognition.stop();
         await endEvent;
       }
+      this.clearStartFallback();
       this.isListening = false;
+      this.startInFlight = false;
+      this.stopInFlight = false;
     } catch (error) {
+      this.clearStartFallback();
+      this.startInFlight = false;
+      this.stopInFlight = false;
       this.resolveStopWaiter();
       const message = error instanceof Error ? error.message : 'Failed to stop listening';
       this.callbacks.onSpeechError?.(message);
@@ -331,7 +385,10 @@ class SpeechServiceImpl {
       } else if (this.nativeAvailable && ExpoSpeechRecognition) {
         ExpoSpeechRecognition.abort();
       }
+      this.clearStartFallback();
       this.isListening = false;
+      this.startInFlight = false;
+      this.stopInFlight = false;
       this.resolveStopWaiter();
     } catch {
       // Silent fail on cancel
@@ -358,6 +415,9 @@ class SpeechServiceImpl {
     }
     this.isInitialized = false;
     this.isListening = false;
+    this.startInFlight = false;
+    this.stopInFlight = false;
+    this.clearStartFallback();
   }
 
   private removeSubscriptions(): void {

@@ -53,6 +53,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
   // Guards the one-time SpeechService initialization (survives React re-renders
   // and StrictMode double-invocation without re-initializing).
   const isInitializedRef = useRef(false);
+  const mountedRef = useRef(true);
 
   const isSupported = SpeechService.isSupported();
 
@@ -78,16 +79,19 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
     }
 
     try {
-      const { status } = await Audio.requestPermissionsAsync();
+      const { status, canAskAgain } = await Audio.requestPermissionsAsync();
       if (status === 'granted') {
         setHasMicrophonePermission(true);
         return true;
       }
 
-      setError('Microphone permission is required for voice recognition.');
+      setHasMicrophonePermission(false);
+      setError(canAskAgain ? 'Microphone permission is required for voice recognition.' : 'Microphone permission is blocked. Please enable it in Settings.');
       Alert.alert(
         'Microphone Permission Required',
-        'JISSI needs microphone access to recognize your voice commands.',
+        canAskAgain
+          ? 'JISSI needs microphone access to recognize your voice commands.'
+          : 'Microphone access is blocked for this app. Please enable it in Android Settings.',
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Open Settings', onPress: () => Linking.openSettings() },
@@ -109,15 +113,18 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
 
     await SpeechService.initialize({
       onSpeechStart: () => {
+        if (!mountedRef.current) return;
         setState('listening');
         setIsListening(true);
         setError(null);
       },
       onSpeechEnd: () => {
+        if (!mountedRef.current) return;
         setState('idle');
         setIsListening(false);
       },
       onSpeechResults: (results: string[]) => {
+        if (!mountedRef.current) return;
         const finalChunk = results[0] || '';
         // Accumulate the final transcript and recompute the intent from the
         // full text. Functional update keeps this correct across re-renders.
@@ -130,13 +137,17 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
         setInterimTranscript('');
       },
       onSpeechPartialResults: (partials: string[]) => {
+        if (!mountedRef.current) return;
         setInterimTranscript(partials[0] || '');
       },
       onSpeechError: (message: string) => {
+        if (!mountedRef.current) return;
         if (message.includes('no-speech') || message.includes('No speech')) {
           setError('No speech detected. Please try again.');
         } else if (message.includes('not-allowed') || message.includes('permission')) {
           setError('Microphone permission denied.');
+        } else if (message.includes('app-in-background')) {
+          setError('Voice paused because the app is not active.');
         } else {
           setError(`Speech recognition error: ${message}`);
         }
@@ -150,8 +161,10 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
 
   // Initialize on mount; tear down on unmount.
   useEffect(() => {
+    mountedRef.current = true;
     initializeSpeech();
     return () => {
+      mountedRef.current = false;
       SpeechService.destroy();
       isInitializedRef.current = false;
     };
@@ -166,9 +179,9 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
       }
       try {
         const { status } = await Audio.getPermissionsAsync();
-        setHasMicrophonePermission(status === 'granted');
+        if (mountedRef.current) setHasMicrophonePermission(status === 'granted');
       } catch {
-        setHasMicrophonePermission(false);
+        if (mountedRef.current) setHasMicrophonePermission(false);
       }
     };
     checkInitialPermission();

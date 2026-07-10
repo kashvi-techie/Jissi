@@ -7,6 +7,7 @@ import { SocialGreetingService } from '@/services/social';
 import { PersonalityService } from '@/services/personality';
 import { ContextEngine } from '@/services/context';
 import { PlannerEngine } from '@/services/planner';
+import { DecisionEngine } from '@/services/decision';
 import { IntentResult, IntentType } from '@/engine/intentEngine';
 
 /** High-level assistant phase surfaced to the UI. */
@@ -151,8 +152,9 @@ export function useConversation(): UseConversationResult {
       // Functional update + the load-time copy guarantee no duplication here.
       setMessages((prev) => [...prev, userMessage]);
       await ContextEngine.observe({ input, intent });
+      const decision = await DecisionEngine.decide({ input, intent });
 
-      if (intent?.intent === 'social_greeting') {
+      if (decision.action === 'relationship_response' && intent?.intent === 'social_greeting') {
         setState('thinking');
         try {
           const replyText = SocialGreetingService.generate({
@@ -180,7 +182,9 @@ export function useConversation(): UseConversationResult {
       }
 
       // ── Branch 1: device action ──────────────────────────────────────────
-      const plannerResult = await PlannerEngine.handleConversationInput(input);
+      const plannerResult = decision.action === 'planner_update'
+        ? await PlannerEngine.handleConversationInput(input)
+        : null;
       if (plannerResult) {
         setState('thinking');
         try {

@@ -7,6 +7,7 @@ import { SpeechState } from '@/services/speech/types';
 import { TTSService } from '@/services/voice';
 import { ProactiveExperience, ProactiveSuggestion } from '@/services/proactive';
 import { OnboardingService } from '@/services/onboarding';
+import { LifeDecision, LifeEngine } from '@/services/life';
 import { AssistantState } from '@/hooks/useConversation';
 import { useConversationMode } from '@/hooks/useConversationMode';
 import { OrbState } from '@/components/orb/PlasmaOrb';
@@ -20,6 +21,9 @@ import { Radii, Spacing } from '@/theme/tokens';
 const WIDE_BREAKPOINT = 900;
 
 type Phase = 'idle' | 'listening' | 'processing' | 'thinking' | 'speaking' | 'tool_execution' | 'offline' | 'error';
+type HomeSuggestion =
+  | { kind: 'life'; decision: LifeDecision; title: string; message: string; action: LifeDecision['action'] }
+  | { kind: 'proactive'; suggestion: ProactiveSuggestion; title: string; message: string; action: ProactiveSuggestion['action'] };
 
 function computePhase(s: SpeechState, a: AssistantState, supported: boolean): Phase {
   if (!supported) return 'offline';
@@ -98,7 +102,7 @@ export default function HomeScreen() {
   const { width } = useWindowDimensions();
   const isWide = width >= WIDE_BREAKPOINT;
   const [talkOpen, setTalkOpen] = useState(false);
-  const [suggestion, setSuggestion] = useState<ProactiveSuggestion | null>(null);
+  const [suggestion, setSuggestion] = useState<HomeSuggestion | null>(null);
 
   const openTopic = (text: string) => {
     setTalkOpen(true);
@@ -134,11 +138,34 @@ export default function HomeScreen() {
         setSuggestion(null);
         return;
       }
-      const suggestions = await ProactiveExperience.getSuggestions({
+      const interruptionState = {
         userTalking: speechState === 'listening' || speechState === 'processing',
         voiceActive: assistantState === 'thinking' || assistantState === 'speaking',
-      });
-      if (!cancelled) setSuggestion(suggestions[0] ?? null);
+      };
+      const lifeDecision = await LifeEngine.getDecision(interruptionState);
+      if (lifeDecision.actionType !== 'silent') {
+        if (!cancelled) {
+          setSuggestion({
+            kind: 'life',
+            decision: lifeDecision,
+            title: lifeDecision.title,
+            message: lifeDecision.message,
+            action: lifeDecision.action,
+          });
+        }
+        return;
+      }
+      const suggestions = await ProactiveExperience.getSuggestions(interruptionState);
+      const proactive = suggestions[0];
+      if (!cancelled) {
+        setSuggestion(proactive ? {
+          kind: 'proactive',
+          suggestion: proactive,
+          title: proactive.title,
+          message: proactive.message,
+          action: proactive.action,
+        } : null);
+      }
     };
     loadSuggestion();
     return () => {
@@ -148,7 +175,11 @@ export default function HomeScreen() {
 
   const acceptSuggestion = async () => {
     if (!suggestion) return;
-    await ProactiveExperience.recordFeedback(suggestion, 'accepted');
+    if (suggestion.kind === 'life') {
+      await LifeEngine.markShown(suggestion.decision);
+    } else {
+      await ProactiveExperience.recordFeedback(suggestion.suggestion, 'accepted');
+    }
     setSuggestion(null);
     if (suggestion.action.type === 'prompt') {
       openTopic(suggestion.action.prompt);
@@ -159,7 +190,11 @@ export default function HomeScreen() {
 
   const dismissSuggestion = async () => {
     if (!suggestion) return;
-    await ProactiveExperience.recordFeedback(suggestion, 'ignored');
+    if (suggestion.kind === 'life') {
+      await LifeEngine.markShown(suggestion.decision);
+    } else {
+      await ProactiveExperience.recordFeedback(suggestion.suggestion, 'ignored');
+    }
     setSuggestion(null);
   };
   const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
@@ -260,7 +295,7 @@ function ProactiveCard({
   onAccept,
   onDismiss,
 }: {
-  suggestion: ProactiveSuggestion;
+  suggestion: HomeSuggestion;
   compact?: boolean;
   onAccept: () => void;
   onDismiss: () => void;

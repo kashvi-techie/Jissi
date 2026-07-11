@@ -54,6 +54,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
   // and StrictMode double-invocation without re-initializing).
   const isInitializedRef = useRef(false);
   const mountedRef = useRef(true);
+  const startRequestRef = useRef(0);
 
   const isSupported = SpeechService.isSupported();
 
@@ -68,11 +69,11 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
         if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           stream.getTracks().forEach((track) => track.stop());
-          setHasMicrophonePermission(true);
+          if (mountedRef.current) setHasMicrophonePermission(true);
           return true;
         }
       } catch {
-        setError('Microphone permission denied. Please allow microphone access in your browser settings.');
+        if (mountedRef.current) setError('Microphone permission denied. Please allow microphone access in your browser settings.');
         return false;
       }
       return true;
@@ -81,10 +82,11 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
     try {
       const { status, canAskAgain } = await Audio.requestPermissionsAsync();
       if (status === 'granted') {
-        setHasMicrophonePermission(true);
+        if (mountedRef.current) setHasMicrophonePermission(true);
         return true;
       }
 
+      if (!mountedRef.current) return false;
       setHasMicrophonePermission(false);
       setError(canAskAgain ? 'Microphone permission is required for voice recognition.' : 'Microphone permission is blocked. Please enable it in Settings.');
       Alert.alert(
@@ -99,7 +101,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
       );
       return false;
     } catch {
-      setError('Failed to request microphone permission.');
+      if (mountedRef.current) setError('Failed to request microphone permission.');
       return false;
     }
   }, []);
@@ -142,6 +144,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
       },
       onSpeechError: (message: string) => {
         if (!mountedRef.current) return;
+        setInterimTranscript('');
         if (message.includes('no-speech') || message.includes('No speech')) {
           setError('No speech detected. Please try again.');
         } else if (message.includes('not-allowed') || message.includes('permission')) {
@@ -188,6 +191,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
   }, []);
 
   const startListening = useCallback(async () => {
+    const requestId = ++startRequestRef.current;
     if (!isSupported) {
       setError('Speech recognition is not supported on this device.');
       setState('error');
@@ -195,6 +199,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
     }
 
     const granted = await requestMicrophonePermission();
+    if (!mountedRef.current || requestId !== startRequestRef.current) return;
     if (!granted) return;
 
     try {
@@ -202,14 +207,17 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
       setInterimTranscript('');
       await SpeechService.startListening('en-US');
     } catch (err) {
+      if (!mountedRef.current || requestId !== startRequestRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to start speech recognition.');
       setState('error');
     }
   }, [isSupported, requestMicrophonePermission]);
 
   const stopListening = useCallback(async () => {
+    startRequestRef.current += 1;
     try {
       await SpeechService.stopListening();
+      if (!mountedRef.current) return;
       setState('idle');
       setInterimTranscript('');
       setIsListening(false);

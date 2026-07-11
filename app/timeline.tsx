@@ -19,6 +19,7 @@ import {
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { Screen, GlassSurface, AppText, PressableScale } from '@/components/ui';
+import { PremiumEmptyState } from '@/components/delight/DelightSurfaces';
 import { TimelineEvent, TimelineFilter, TimelineService, TimelineSnapshot } from '@/services/timeline';
 import { useTheme } from '@/theme';
 import { Fonts } from '@/theme/typography';
@@ -199,14 +200,11 @@ export default function TimelineScreen() {
             </View>
           ))}
           {!groups.length ? (
-            <GlassSurface intensity={24} radius={Radii.xl} style={styles.empty}>
-              <AppText variant="bodyStrong" color="primary">
-                Your timeline is waiting for its first chapter.
-              </AppText>
-              <AppText variant="caption" color="muted">
-                Create goals, complete planner tasks, build habits, add memories or have meaningful conversations with JISSI.
-              </AppText>
-            </GlassSurface>
+            <PremiumEmptyState
+              icon={BookOpen}
+              title="Your story is waiting to be written."
+              description="Create goals, complete planner tasks, build habits, add memories or have meaningful conversations with JISSI."
+            />
           ) : null}
         </View>
       </ScrollView>
@@ -352,5 +350,4 @@ const styles = StyleSheet.create({
   note: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, padding: Spacing.md },
   noteText: { flex: 1 },
   addNote: { alignSelf: 'flex-start', minHeight: 34, justifyContent: 'center' },
-  empty: { padding: Spacing.xl, gap: Spacing.sm },
 });

@@ -83,6 +83,11 @@ class SpeechServiceImpl {
   private startInFlight = false;
   private stopInFlight = false;
   private startToken = 0;
+  private lastNativeRecoveryAt = 0;
+
+  private static readonly NATIVE_START_ACK_TIMEOUT_MS = 900;
+  private static readonly NATIVE_STOP_ACK_TIMEOUT_MS = 900;
+  private static readonly NATIVE_RECOVERY_COOLDOWN_MS = 350;
 
   private resolveStopWaiter(): void {
     const resolve = this.stopWaiter;
@@ -94,6 +99,31 @@ class SpeechServiceImpl {
     if (!this.startFallbackTimer) return;
     clearTimeout(this.startFallbackTimer);
     this.startFallbackTimer = null;
+  }
+
+  private isRecoverableNativeError(message: string): boolean {
+    return !/permission|denied|not-allowed|not available|app-in-background/i.test(message);
+  }
+
+  private async recoverNativeRecognizer(message: string): Promise<void> {
+    if (Platform.OS === 'web' || !ExpoSpeechRecognition || !this.isRecoverableNativeError(message)) return;
+    const now = Date.now();
+    if (now - this.lastNativeRecoveryAt < SpeechServiceImpl.NATIVE_RECOVERY_COOLDOWN_MS) return;
+    this.lastNativeRecoveryAt = now;
+
+    try {
+      // Android recognizers can get wedged after audio-focus churn between STT
+      // and TTS. Abort releases the stale native session so the coordinator can
+      // retry without requiring an app restart.
+      ExpoSpeechRecognition.abort();
+    } catch {
+      // The recognizer may already be inactive; recovery is best-effort.
+    }
+    this.clearStartFallback();
+    this.isListening = false;
+    this.startInFlight = false;
+    this.stopInFlight = false;
+    this.resolveStopWaiter();
   }
 
   private async prepareAudioForRecognition(): Promise<void> {
@@ -228,7 +258,9 @@ class SpeechServiceImpl {
       this.stopInFlight = false;
       this.isListening = false;
       this.resolveStopWaiter();
-      this.callbacks.onSpeechError?.(ev.message || ev.error || 'Unknown speech error');
+      const message = ev.message || ev.error || 'Unknown speech error';
+      void this.recoverNativeRecognizer(message);
+      this.callbacks.onSpeechError?.(message);
     });
     add<{ value: number }>('volumechange', (ev) => {
       this.callbacks.onVolumeChanged?.(ev.value);
@@ -242,7 +274,7 @@ class SpeechServiceImpl {
   }
 
   private handleAppStateChange = (next: AppStateStatus): void => {
-    if (next !== 'active' && this.isListening) {
+    if (next !== 'active' && (this.isListening || this.startInFlight || this.stopInFlight)) {
       this.cancelListening();
     }
   };
@@ -326,7 +358,7 @@ class SpeechServiceImpl {
             this.startInFlight = false;
             this.callbacks.onSpeechStart?.();
           }
-        }, 900);
+        }, SpeechServiceImpl.NATIVE_START_ACK_TIMEOUT_MS);
       } else {
         // Unsupported runtime (e.g. Expo Go without the native module): fail
         // gracefully — never throw a runtime error.
@@ -336,17 +368,18 @@ class SpeechServiceImpl {
         return;
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to start listening';
+      await this.recoverNativeRecognizer(message);
       this.clearStartFallback();
       this.startInFlight = false;
       this.isListening = false;
-      const message = error instanceof Error ? error.message : 'Failed to start listening';
       this.callbacks.onSpeechError?.(message);
       throw error;
     }
   }
 
   async stopListening(): Promise<void> {
-    if (!this.isListening || this.stopInFlight) return;
+    if ((!this.isListening && !this.startInFlight) || this.stopInFlight) return;
     this.stopInFlight = true;
 
     try {
@@ -359,9 +392,15 @@ class SpeechServiceImpl {
             if (this.stopWaiter === resolve) {
               this.resolveStopWaiter();
             }
-          }, 900);
+          }, SpeechServiceImpl.NATIVE_STOP_ACK_TIMEOUT_MS);
         });
-        ExpoSpeechRecognition.stop();
+        if (this.startInFlight) {
+          // If a stop arrives while native start is still acknowledging, abort is
+          // safer than stop: some Android recognizers throw on stop-before-start.
+          ExpoSpeechRecognition.abort();
+        } else {
+          ExpoSpeechRecognition.stop();
+        }
         await endEvent;
       }
       this.clearStartFallback();
@@ -418,6 +457,7 @@ class SpeechServiceImpl {
     this.startInFlight = false;
     this.stopInFlight = false;
     this.clearStartFallback();
+    this.resolveStopWaiter();
   }
 
   private removeSubscriptions(): void {

@@ -2,6 +2,7 @@ import React, { memo, useEffect, useMemo, useRef } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
+  FadeInUp,
   SharedValue,
   useAnimatedStyle,
   useSharedValue,
@@ -51,7 +52,7 @@ const TimelineBubble = memo(function TimelineBubble({ message, grouped }: { mess
   const theme = useTheme();
   const isUser = message.role === 'user';
   return (
-    <Animated.View style={[styles.row, isUser ? styles.right : styles.left, grouped && styles.grouped]}>
+    <Animated.View entering={FadeInUp.duration(260)} style={[styles.row, isUser ? styles.right : styles.left, grouped && styles.grouped]}>
       <View
         style={[
           styles.bubble,
@@ -62,7 +63,7 @@ const TimelineBubble = memo(function TimelineBubble({ message, grouped }: { mess
           },
         ]}
       >
-        <AppText variant="caption" color="primary" numberOfLines={3}>
+        <AppText variant="body" color="primary" numberOfLines={4}>
           {message.content}
         </AppText>
       </View>
@@ -99,18 +100,18 @@ function TypingDot({ pulse, dot }: { pulse: SharedValue<number>; dot: number }) 
 }
 
 const styles = StyleSheet.create({
-  scroller: { width: '100%', maxHeight: 156 },
-  content: { gap: Spacing.xs, paddingHorizontal: Spacing.lg, paddingBottom: Spacing.xs },
+  scroller: { width: '100%', maxHeight: 190 },
+  content: { gap: Spacing.sm, paddingHorizontal: Spacing.md, paddingBottom: Spacing.xs },
   row: { flexDirection: 'row', marginTop: Spacing.xs },
-  grouped: { marginTop: 1 },
+  grouped: { marginTop: 2 },
   left: { justifyContent: 'flex-start' },
   right: { justifyContent: 'flex-end' },
   bubble: {
-    maxWidth: '82%',
+    maxWidth: '88%',
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radii.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
   },
   assistantBubble: { borderBottomLeftRadius: 6 },
   userBubble: { borderBottomRightRadius: 6 },

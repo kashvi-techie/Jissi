@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
 import { TTSState, TTSServiceConfig, TTSOptions, DEFAULT_TTS_CONFIG } from './types';
@@ -12,6 +12,13 @@ class TTSServiceImpl {
   private currentText: string = '';
   private isAvailable: boolean = true;
   private speakToken = 0;
+  private appStateSub = AppState.addEventListener('change', (next) => {
+    if (Platform.OS !== 'web' && next !== 'active' && this.currentState === 'speaking') {
+      // Android can leave audio focus in a bad state if TTS continues while the
+      // Activity is paused. Stop cleanly so STT can reacquire the mic on resume.
+      void this.stop();
+    }
+  });
 
   /** Conversational voice defaults — a touch slower and slightly brighter reads
    *  warmer / less robotic than a flat 1.0 / 1.0. */
@@ -152,7 +159,9 @@ class TTSServiceImpl {
       this.setState('speaking');
       options?.onStart?.();
 
-      try {
+      let attempt = 0;
+      const speakNative = () => {
+        attempt += 1;
         Speech.speak(spoken, {
           language: options?.voice ? undefined : this.config.language,
           rate: options?.rate ?? this.config.rate ?? TTSServiceImpl.NATURAL_RATE,
@@ -160,8 +169,21 @@ class TTSServiceImpl {
           voice: options?.voice ?? this.config.voice,
           onStart: () => this.setState('speaking'),
           onDone: () => finish(false),
-          onError: (error: any) => finish(true, String(error)),
+          onError: (error: any) => {
+            if (Platform.OS === 'android' && attempt === 1 && token === this.speakToken) {
+              // Some Android devices report a transient TTS engine error right
+              // after STT releases audio focus. A single delayed retry is enough
+              // to recover without duplicating speech.
+              setTimeout(speakNative, 220);
+              return;
+            }
+            finish(true, String(error));
+          },
         });
+      };
+
+      try {
+        speakNative();
       } catch (error) {
         finish(true, error instanceof Error ? error.message : 'Unknown TTS error');
         return;

@@ -3,6 +3,7 @@ import { Alert, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { CalendarCheck2, CheckCircle2, Download, Flag, Trash2 } from 'lucide-react-native';
 import { Screen, GlassSurface, AppText, PressableScale } from '@/components/ui';
+import { PremiumEmptyState } from '@/components/delight/DelightSurfaces';
 import { PlannerEngine, PlannerSnapshot } from '@/services/planner';
 import { useTheme } from '@/theme';
 import { Radii, Spacing } from '@/theme/tokens';
@@ -145,7 +146,13 @@ export default function PlannerDebugScreen() {
               ))}
             </GlassSurface>
           ))}
-          {!snapshot.goals.length ? <Empty text="No goals yet. Try: I want to learn React." /> : null}
+          {!snapshot.goals.length ? (
+            <PremiumEmptyState
+              icon={Flag}
+              title="Every great journey starts with one goal."
+              description="Tell JISSI what you are working toward, and your planner will begin shaping milestones locally."
+            />
+          ) : null}
         </Section>
 
         <Section title="History" count={snapshot.history.length}>

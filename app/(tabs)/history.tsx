@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 're
 import { Clock, MessageCircle, Search } from 'lucide-react-native';
 import { useFocusEffect } from 'expo-router';
 import { Screen, GlassSurface, AppText } from '@/components/ui';
+import { GlassSkeleton, PremiumEmptyState } from '@/components/delight/DelightSurfaces';
 import { useTheme } from '@/theme';
 import { Radii, Spacing } from '@/theme/tokens';
 import { ConversationRepository, Conversation } from '@/services/conversation';
@@ -111,19 +112,15 @@ export default function HistoryScreen() {
         {loading ? (
           <View style={styles.list}>
             {[0, 1, 2].map((item) => (
-              <HistorySkeleton key={item} />
+              <GlassSkeleton key={item} lines={3} />
             ))}
           </View>
         ) : filtered.length === 0 ? (
-          <GlassSurface intensity={34} radius={Radii.xl} style={styles.empty}>
-            <MessageCircle size={26} color={theme.colors.textMuted} strokeWidth={1.6} />
-            <AppText variant="bodyStrong" color="primary">
-              No conversations found
-            </AppText>
-            <AppText variant="body" color="muted" style={styles.emptyText}>
-              JISSI will keep your meaningful chats here once they begin.
-            </AppText>
-          </GlassSurface>
+          <PremiumEmptyState
+            icon={MessageCircle}
+            title={query.trim() ? 'No conversations found.' : 'No conversations yet. Let\'s create something memorable.'}
+            description={query.trim() ? 'Try a softer search term or start a fresh conversation with JISSI.' : 'Your meaningful chats will appear here with calm date grouping and quick search.'}
+          />
         ) : (
           grouped.map((group) => (
             <View key={group.name} style={styles.group}>
@@ -162,17 +159,6 @@ export default function HistoryScreen() {
   );
 }
 
-function HistorySkeleton() {
-  const theme = useTheme();
-  return (
-    <GlassSurface intensity={24} radius={Radii.lg} style={styles.card}>
-      <View style={[styles.skeletonTitle, { backgroundColor: theme.colors.fill }]} />
-      <View style={[styles.skeletonLine, { backgroundColor: theme.colors.fill }]} />
-      <View style={[styles.skeletonShort, { backgroundColor: theme.colors.fill }]} />
-    </GlassSurface>
-  );
-}
-
 const styles = StyleSheet.create({
   content: { paddingHorizontal: Spacing.gutter, paddingTop: Spacing.xxxl, paddingBottom: 120, gap: Spacing.lg },
   contentWide: { maxWidth: 820, alignSelf: 'center', width: '100%' },
@@ -181,14 +167,9 @@ const styles = StyleSheet.create({
   badge: { width: 72, height: 72, alignItems: 'center', justifyContent: 'center' },
   searchBox: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingHorizontal: Spacing.lg, height: 52 },
   input: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 16, height: 48, padding: 0 },
-  empty: { minHeight: 180, alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, padding: Spacing.xl },
-  emptyText: { textAlign: 'center' },
   group: { gap: Spacing.md },
   list: { gap: Spacing.md },
   card: { padding: Spacing.lg, gap: Spacing.sm },
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   cardTitle: { flex: 1 },
-  skeletonTitle: { width: '58%', height: 18, borderRadius: 9 },
-  skeletonLine: { width: '86%', height: 12, borderRadius: 8 },
-  skeletonShort: { width: '34%', height: 10, borderRadius: 7 },
 });

@@ -97,6 +97,9 @@ export function useConversationMode(): UseConversationModeResult {
   const errorCountRef = useRef(0);
   const sessionStartRef = useRef<number | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const micStartInFlightRef = useRef(false);
+  const pausedByBackgroundRef = useRef(false);
+  const mountedRef = useRef(true);
 
   const clearTimer = useCallback(() => {
     if (restartTimerRef.current) {
@@ -107,11 +110,20 @@ export function useConversationMode(): UseConversationModeResult {
 
   /** Open the mic for a fresh turn: reset the transcript + de-dupe guard so even
    *  a phrase repeated across turns is still processed. */
-  const beginListening = useCallback(() => {
+  const beginListening = useCallback(async () => {
+    if (micStartInFlightRef.current || appStateRef.current !== 'active') return;
+    micStartInFlightRef.current = true;
     prevTranscriptRef.current = '';
     clearTranscript();
     HapticsService.play('listen_start');
-    startListening();
+    try {
+      await startListening();
+    } catch {
+      // startListening already publishes a user-facing error. Catch here so a
+      // native STT crash never becomes an unhandled promise rejection.
+    } finally {
+      micStartInFlightRef.current = false;
+    }
   }, [clearTranscript, startListening]);
 
   const stopConversation = useCallback(() => {
@@ -127,10 +139,23 @@ export function useConversationMode(): UseConversationModeResult {
     sessionStartRef.current = null;
     isActiveRef.current = false;
     setIsActive(false);
+    pausedByBackgroundRef.current = false;
+    micStartInFlightRef.current = false;
     clearTimer();
-    stopListening();
-    stopSpeaking();
+    void stopListening();
+    void stopSpeaking();
     HapticsService.play('listen_stop');
+  }, [clearTimer, stopListening, stopSpeaking]);
+
+  const pauseForBackground = useCallback(() => {
+    if (!isActiveRef.current) return;
+    // Android may revoke mic/audio focus while the Activity is paused. Pause the
+    // loop without ending the session, then reopen the mic after foregrounding.
+    pausedByBackgroundRef.current = true;
+    clearTimer();
+    micStartInFlightRef.current = false;
+    void stopListening();
+    void stopSpeaking();
   }, [clearTimer, stopListening, stopSpeaking]);
 
   const startConversation = useCallback(() => {
@@ -144,7 +169,7 @@ export function useConversationMode(): UseConversationModeResult {
     });
     setIsActive(true);
     errorCountRef.current = 0;
-    beginListening();
+    void beginListening();
   }, [isSupported, beginListening]);
 
   const toggle = useCallback(() => {
@@ -182,7 +207,7 @@ export function useConversationMode(): UseConversationModeResult {
       clearTimer();
       restartTimerRef.current = setTimeout(() => {
         restartTimerRef.current = null;
-        if (isActiveRef.current && appStateRef.current === 'active') beginListening();
+        if (isActiveRef.current && appStateRef.current === 'active') void beginListening();
       }, delay);
     },
     [clearTimer, beginListening]
@@ -255,15 +280,27 @@ export function useConversationMode(): UseConversationModeResult {
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
       appStateRef.current = next;
-      if (next !== 'active' && isActiveRef.current) {
-        stopConversation();
+      if (next !== 'active') {
+        pauseForBackground();
+        return;
+      }
+      if (pausedByBackgroundRef.current && isActiveRef.current) {
+        pausedByBackgroundRef.current = false;
+        scheduleRestart(RESTART_DELAY_MS);
       }
     });
     return () => sub.remove();
-  }, [stopConversation]);
+  }, [pauseForBackground, scheduleRestart]);
 
   // Clear any pending restart on unmount.
-  useEffect(() => () => clearTimer(), [clearTimer]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearTimer();
+      micStartInFlightRef.current = false;
+    };
+  }, [clearTimer]);
 
   const mode = computeMode(isActive, speechState, assistantState, isListening);
 

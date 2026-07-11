@@ -17,6 +17,7 @@ import {
 import * as SplashScreen from 'expo-splash-screen';
 import { AssistantProvider } from '@/services/AssistantContext';
 import { FloatingOrbOverlay } from '@/components/FloatingOrbOverlay';
+import { AppErrorBoundary } from '@/components/reliability/AppErrorBoundary';
 import { ThemeProvider } from '@/theme';
 // Side-effect: installs built-in tools + bridges them into AIService (dormant
 // until EXPO_PUBLIC_TOOLS_ENABLED=true). No runtime effect while the flag is off.
@@ -49,23 +50,25 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider>
-      <AssistantProvider>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="behavior-debug" options={{ headerShown: false }} />
-          <Stack.Screen name="context-debug" options={{ headerShown: false }} />
-          <Stack.Screen name="emotion-debug" options={{ headerShown: false }} />
-          <Stack.Screen name="planner-debug" options={{ headerShown: false }} />
-          <Stack.Screen name="proactive-debug" options={{ headerShown: false }} />
-          <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-          <Stack.Screen name="timeline" options={{ headerShown: false }} />
-          <Stack.Screen name="life-debug" options={{ headerShown: false }} />
-          <Stack.Screen name="decision-debug" options={{ headerShown: false }} />
-          <Stack.Screen name="+not-found" />
-        </Stack>
-        <StatusBar style="light" />
-        <FloatingOrbOverlay />
-      </AssistantProvider>
+      <AppErrorBoundary>
+        <AssistantProvider>
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="behavior-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="context-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="emotion-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="planner-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="proactive-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+            <Stack.Screen name="timeline" options={{ headerShown: false }} />
+            <Stack.Screen name="life-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="decision-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="+not-found" />
+          </Stack>
+          <StatusBar style="light" />
+          <FloatingOrbOverlay />
+        </AssistantProvider>
+      </AppErrorBoundary>
     </ThemeProvider>
   );
 }

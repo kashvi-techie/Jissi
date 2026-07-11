@@ -18,6 +18,7 @@ import {
 import type { LucideIcon } from 'lucide-react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Screen, GlassSurface, AppText, PressableScale } from '@/components/ui';
+import { PremiumEmptyState } from '@/components/delight/DelightSurfaces';
 import { useTheme, useThemeMode } from '@/theme';
 import { Radii, Spacing } from '@/theme/tokens';
 import { ConversationRepository } from '@/services/conversation';
@@ -145,6 +146,14 @@ export default function ProfileScreen() {
             </View>
           </View>
         </GlassSurface>
+
+        {!loading && stats.memoriesStored === 0 ? (
+          <PremiumEmptyState
+            icon={Brain}
+            title="I'll remember the moments that matter."
+            description="When JISSI learns useful preferences, people, and milestones, they will make this dashboard feel personal."
+          />
+        ) : null}
 
         <PressableScale onPress={toggle} accessibilityRole="button" accessibilityLabel="Toggle appearance">
           <GlassSurface intensity={36} radius={Radii.lg} style={styles.row}>

@@ -36,6 +36,7 @@ import { BehaviorEngine } from '@/services/behavior';
 import { TimelineService } from '@/services/timeline';
 import { DelightService, DelightAchievement, DelightSnapshot } from '@/services/delight';
 import { RelationshipService, RelationshipProfile } from '@/services/relationships';
+import { ExplainabilityService } from '@/services/explainability';
 import { AssistantState } from '@/hooks/useConversation';
 import { useConversationMode } from '@/hooks/useConversationMode';
 import { OrbState } from '@/components/orb/PlasmaOrb';
@@ -55,8 +56,8 @@ const WIDE_BREAKPOINT = 900;
 
 type Phase = 'idle' | 'listening' | 'processing' | 'thinking' | 'speaking' | 'tool_execution' | 'offline' | 'error';
 type HomeSuggestion =
-  | { kind: 'life'; decision: LifeDecision; title: string; message: string; action: LifeDecision['action'] }
-  | { kind: 'proactive'; suggestion: ProactiveSuggestion; title: string; message: string; action: ProactiveSuggestion['action'] };
+  | { kind: 'life'; decision: LifeDecision; title: string; message: string; explanation: string; action: LifeDecision['action'] }
+  | { kind: 'proactive'; suggestion: ProactiveSuggestion; title: string; message: string; explanation: string; action: ProactiveSuggestion['action'] };
 
 function computePhase(s: SpeechState, a: AssistantState, supported: boolean): Phase {
   if (!supported) return 'offline';
@@ -447,6 +448,7 @@ export default function HomeScreen() {
             decision: lifeDecision,
             title: lifeDecision.title,
             message: lifeDecision.message,
+            explanation: ExplainabilityService.explainLifeDecision(lifeDecision),
             action: lifeDecision.action,
           });
         }
@@ -460,6 +462,7 @@ export default function HomeScreen() {
           suggestion: proactive,
           title: proactive.title,
           message: proactive.message,
+          explanation: ExplainabilityService.explainProactiveSuggestion(proactive),
           action: proactive.action,
         } : null);
       }
@@ -881,6 +884,9 @@ function ProactiveCard({
         </AppText>
         <AppText variant="caption" color="muted" numberOfLines={compact ? 2 : 3}>
           {suggestion.message}
+        </AppText>
+        <AppText variant="footnote" color="tertiary" numberOfLines={compact ? 1 : 2}>
+          {suggestion.explanation}
         </AppText>
       </PressableScale>
       <PressableScale onPress={onDismiss} accessibilityRole="button" accessibilityLabel="Dismiss suggestion" style={styles.dismissButton}>

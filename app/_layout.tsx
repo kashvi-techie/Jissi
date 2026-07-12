@@ -58,6 +58,7 @@ export default function RootLayout() {
             <Stack.Screen name="action-debug" options={{ headerShown: false }} />
             <Stack.Screen name="context-debug" options={{ headerShown: false }} />
             <Stack.Screen name="emotion-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="explain-debug" options={{ headerShown: false }} />
             <Stack.Screen name="planner-debug" options={{ headerShown: false }} />
             <Stack.Screen name="proactive-debug" options={{ headerShown: false }} />
             <Stack.Screen name="relationship-debug" options={{ headerShown: false }} />

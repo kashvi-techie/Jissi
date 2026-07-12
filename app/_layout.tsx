@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { StyleSheet, Text, View } from 'react-native';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { useFonts } from 'expo-font';
 import {
@@ -23,10 +24,19 @@ import { ThemeProvider } from '@/theme';
 // until EXPO_PUBLIC_TOOLS_ENABLED=true). No runtime effect while the flag is off.
 import '@/services/tools/register';
 
-SplashScreen.preventAutoHideAsync();
+console.log('__JISSI_DEBUG_OK__');
+
+SplashScreen.preventAutoHideAsync().catch((error) => {
+  console.warn('[JISSI] Splash preventAutoHide failed', error);
+});
+
+const STARTUP_TIMEOUT_MS = 3000;
 
 export default function RootLayout() {
   useFrameworkReady();
+  const splashHiddenRef = useRef(false);
+  const [startupReady, setStartupReady] = useState(false);
+  const [startupError, setStartupError] = useState<string | null>(null);
 
   const [fontsLoaded, fontError] = useFonts({
     Exo2_400Regular,
@@ -39,13 +49,37 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
+    const timer = setTimeout(() => {
+      setStartupError((current) => current ?? 'Startup took longer than expected.');
+      setStartupReady(true);
+    }, STARTUP_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (fontError) {
+      console.warn('[JISSI] Font loading failed; continuing startup with system fonts.', fontError);
+      setStartupError('Fonts could not finish loading, so JISSI started with system fonts.');
+    }
     if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync();
+      setStartupReady(true);
     }
   }, [fontsLoaded, fontError]);
 
-  if (!fontsLoaded && !fontError) {
-    return null;
+  useEffect(() => {
+    if (!startupReady || splashHiddenRef.current) return;
+    splashHiddenRef.current = true;
+    SplashScreen.hideAsync().catch((error) => {
+      console.warn('[JISSI] Splash hide failed', error);
+    });
+  }, [startupReady]);
+
+  if (!startupReady) {
+    return <StartupFallback message="Starting JISSI..." />;
+  }
+
+  if (startupError && !fontsLoaded && !fontError) {
+    return <StartupFallback message="JISSI is starting with a lighter boot path." />;
   }
 
   return (
@@ -56,6 +90,10 @@ export default function RootLayout() {
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="behavior-debug" options={{ headerShown: false }} />
             <Stack.Screen name="action-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="agent-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="task-planner-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="orchestrator-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="skills-debug" options={{ headerShown: false }} />
             <Stack.Screen name="context-debug" options={{ headerShown: false }} />
             <Stack.Screen name="emotion-debug" options={{ headerShown: false }} />
             <Stack.Screen name="explain-debug" options={{ headerShown: false }} />
@@ -66,6 +104,7 @@ export default function RootLayout() {
             <Stack.Screen name="timeline" options={{ headerShown: false }} />
             <Stack.Screen name="life-debug" options={{ headerShown: false }} />
             <Stack.Screen name="decision-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="memory-consolidation-debug" options={{ headerShown: false }} />
             <Stack.Screen name="+not-found" />
           </Stack>
           <StatusBar style="light" />
@@ -75,3 +114,29 @@ export default function RootLayout() {
     </ThemeProvider>
   );
 }
+
+function StartupFallback({ message }: { message: string }) {
+  return (
+    <View style={styles.startupRoot}>
+      <View style={styles.startupOrb} />
+      <Text style={styles.startupText}>{message}</Text>
+      <View style={styles.startupLine} />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  startupRoot: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 20, backgroundColor: '#020712' },
+  startupOrb: {
+    width: 78,
+    height: 78,
+    borderRadius: 39,
+    backgroundColor: '#5DDCFF',
+    shadowColor: '#5DDCFF',
+    shadowOpacity: 0.58,
+    shadowRadius: 32,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  startupText: { color: 'rgba(255,255,255,0.72)', fontSize: 15, letterSpacing: 0, textAlign: 'center' },
+  startupLine: { width: 132, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.22)' },
+});

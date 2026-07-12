@@ -111,13 +111,17 @@ export function useConversationMode(): UseConversationModeResult {
   /** Open the mic for a fresh turn: reset the transcript + de-dupe guard so even
    *  a phrase repeated across turns is still processed. */
   const beginListening = useCallback(async () => {
+    console.log('[STEP 2] useConversationMode entered');
+    console.log('[STT][mode:beginListening] inFlight=', micStartInFlightRef.current, 'appState=', appStateRef.current);
     if (micStartInFlightRef.current || appStateRef.current !== 'active') return;
     micStartInFlightRef.current = true;
     prevTranscriptRef.current = '';
     clearTranscript();
     HapticsService.play('listen_start');
     try {
+      console.log('[STT][mode:beginListening] calling startListening');
       await startListening();
+      console.log('[STT][mode:beginListening] startListening returned');
     } catch {
       // startListening already publishes a user-facing error. Catch here so a
       // native STT crash never becomes an unhandled promise rejection.
@@ -159,6 +163,8 @@ export function useConversationMode(): UseConversationModeResult {
   }, [clearTimer, stopListening, stopSpeaking]);
 
   const startConversation = useCallback(() => {
+    console.log('[STEP 2] useConversationMode entered');
+    console.log('[STT][mode:startConversation] isSupported=', isSupported, 'isActive=', isActiveRef.current);
     if (!isSupported || isActiveRef.current) return;
     isActiveRef.current = true;
     sessionStartRef.current = Date.now();
@@ -173,6 +179,7 @@ export function useConversationMode(): UseConversationModeResult {
   }, [isSupported, beginListening]);
 
   const toggle = useCallback(() => {
+    console.log('[STEP 2] useConversationMode entered');
     if (isActiveRef.current) stopConversation();
     else startConversation();
   }, [startConversation, stopConversation]);

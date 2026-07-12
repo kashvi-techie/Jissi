@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { AIService, AIMessage, AIGenerationResult } from '@/services/ai';
-import { ConversationRepository, Conversation } from '@/services/conversation';
+import { ConversationRepository, Conversation, NaturalConversationEngine } from '@/services/conversation';
 import { TTSService, TTSState } from '@/services/voice';
 import { ActionService, ActionResult } from '@/services/actions';
 import { SocialGreetingService } from '@/services/social';
@@ -9,6 +9,7 @@ import { PersonalityService } from '@/services/personality';
 import { ContextEngine } from '@/services/context';
 import { PlannerEngine } from '@/services/planner';
 import { DecisionEngine } from '@/services/decision';
+import { AgentRouter } from '@/services/agent';
 import { IntentResult, IntentType } from '@/engine/intentEngine';
 
 /** High-level assistant phase surfaced to the UI. */
@@ -67,6 +68,7 @@ export function useConversation(): UseConversationResult {
   const [ttsState, setTTSState] = useState<TTSState>('idle');
 
   const isInitializedRef = useRef(false);
+  const pendingAgentConfirmationRef = useRef<string | null>(null);
   // Single-flight lock: prevents a second overlapping request (and thus a
   // duplicate AI/action call) while one is already being processed.
   const isProcessingRef = useRef(false);
@@ -154,6 +156,27 @@ export function useConversation(): UseConversationResult {
       setMessages((prev) => [...prev, userMessage]);
       await ContextEngine.observe({ input, intent });
 
+      const smallTalk = await NaturalConversationEngine.detectSmallTalk(input);
+      if (smallTalk) {
+        setState('thinking');
+        try {
+          const assistantMessage = await ConversationRepository.addMessage({
+            conversationId: currentConversation?.id || '',
+            role: 'assistant',
+            content: smallTalk.reply,
+          });
+          setMessages((prev) => [...prev, assistantMessage]);
+          setLastResponse(smallTalk.reply);
+          await ContextEngine.rememberAssistantResponse(smallTalk.reply);
+          await TTSService.speak(smallTalk.reply);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Small talk failed');
+        } finally {
+          setState('idle');
+        }
+        return;
+      }
+
       const relationshipResult = await RelationshipService.handleConversation(input);
       if (relationshipResult) {
         setState('thinking');
@@ -177,6 +200,50 @@ export function useConversation(): UseConversationResult {
       }
 
       const decision = await DecisionEngine.decide({ input, intent });
+
+      if (pendingAgentConfirmationRef.current && /^(yes|yeah|yep|confirm|do it|go ahead|sure|haan|ha)$/i.test(input.trim())) {
+        setState('thinking');
+        try {
+          const agentResult = await AgentRouter.confirm(pendingAgentConfirmationRef.current);
+          pendingAgentConfirmationRef.current = null;
+          const replyText = PersonalityService.warmShortReply(agentResult.message);
+          const assistantMessage = await ConversationRepository.addMessage({
+            conversationId: currentConversation?.id || '',
+            role: 'assistant',
+            content: replyText,
+          });
+          setMessages((prev) => [...prev, assistantMessage]);
+          setLastResponse(replyText);
+          await ContextEngine.rememberAssistantResponse(replyText);
+          await TTSService.speak(replyText);
+        } catch (err) {
+          pendingAgentConfirmationRef.current = null;
+          setError(err instanceof Error ? err.message : 'Agent confirmation failed');
+        } finally {
+          setState('idle');
+        }
+        return;
+      }
+
+      if (pendingAgentConfirmationRef.current && /^(no|nope|cancel|stop|nah|mat karo|nahi)$/i.test(input.trim())) {
+        pendingAgentConfirmationRef.current = null;
+        setState('thinking');
+        try {
+          const replyText = PersonalityService.warmShortReply("Okay, I won't do that.");
+          const assistantMessage = await ConversationRepository.addMessage({
+            conversationId: currentConversation?.id || '',
+            role: 'assistant',
+            content: replyText,
+          });
+          setMessages((prev) => [...prev, assistantMessage]);
+          setLastResponse(replyText);
+          await ContextEngine.rememberAssistantResponse(replyText);
+          await TTSService.speak(replyText);
+        } finally {
+          setState('idle');
+        }
+        return;
+      }
 
       if (decision.action === 'relationship_response' && intent?.intent === 'social_greeting') {
         setState('thinking');
@@ -213,6 +280,31 @@ export function useConversation(): UseConversationResult {
       }
 
       // ── Branch 1: device action ──────────────────────────────────────────
+      const agentResult = await AgentRouter.route({ input, decision });
+      if (agentResult.handled) {
+        setState('thinking');
+        try {
+          if (agentResult.record.state === 'asking_confirmation') {
+            pendingAgentConfirmationRef.current = agentResult.record.id;
+          }
+          const replyText = PersonalityService.warmShortReply(agentResult.message);
+          const assistantMessage = await ConversationRepository.addMessage({
+            conversationId: currentConversation?.id || '',
+            role: 'assistant',
+            content: replyText,
+          });
+          setMessages((prev) => [...prev, assistantMessage]);
+          setLastResponse(replyText);
+          await ContextEngine.rememberAssistantResponse(replyText);
+          await TTSService.speak(replyText);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Agent action failed');
+        } finally {
+          setState('idle');
+        }
+        return;
+      }
+
       const plannerResult = decision.action === 'planner_update'
         ? await PlannerEngine.handleConversationInput(input)
         : null;
@@ -276,6 +368,16 @@ export function useConversation(): UseConversationResult {
 
       setState('thinking');
       try {
+        const filler = await NaturalConversationEngine.thinkingFiller(input);
+        if (filler) {
+          const fillerMessage = await ConversationRepository.addMessage({
+            conversationId: currentConversation?.id || '',
+            role: 'assistant',
+            content: filler,
+          });
+          setMessages((prev) => [...prev, fillerMessage]);
+          setLastResponse(filler);
+        }
         const contextualPrompt = await ContextEngine.buildPromptContext(input);
         const result: AIGenerationResult = await AIService.generate(contextualPrompt);
 

@@ -1,7 +1,7 @@
 import React, { memo, useEffect, useMemo } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BookOpen, CalendarCheck2, MessageSquare, Settings, Sparkles, Users, X } from 'lucide-react-native';
+import { BookOpen, CalendarCheck2, MessageSquare, Settings, Sparkles, Users } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import Animated, { FadeInUp, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { OrbEngine } from '@/components/orb/OrbEngine';
@@ -58,7 +58,6 @@ export const TalkView = memo(function TalkView({
   transcript,
   messages = [],
   onMic,
-  onBack,
   onMessage,
   greeting = 'Good Evening',
   greetingSubtext = 'JISSI is ready when you are.',
@@ -76,7 +75,7 @@ export const TalkView = memo(function TalkView({
 }: TalkViewProps) {
   const theme = useTheme();
   const { width } = useWindowDimensions();
-  const orbSize = Math.round(Math.min(width * 0.72, 340));
+  const orbSize = Math.round(Math.min(width * 0.62, 286));
   const isActive = orbState === 'listening' || orbState === 'speaking' || orbState === 'tool_execution';
   const isThinking = orbState === 'thinking' || orbState === 'tool_execution';
   const waveIntensity = orbState === 'speaking' ? 1.25 : orbState === 'listening' ? 0.9 : 0.65;
@@ -86,6 +85,11 @@ export const TalkView = memo(function TalkView({
   useEffect(() => {
     orbPulse.value = withRepeat(withTiming(1, { duration: orbState === 'speaking' ? 1200 : 4200 }), -1, true);
   }, [orbPulse, orbState]);
+
+  const handleMicPress = () => {
+    console.log('[STEP 1] Mic pressed');
+    onMic();
+  };
 
   const orbScale = useAnimatedStyle(() => ({
     transform: [{ scale: 1 + orbPulse.value * (orbState === 'speaking' ? 0.055 : 0.018) }],
@@ -121,13 +125,6 @@ export const TalkView = memo(function TalkView({
             </GlassSurface>
           </PressableScale>
         </Animated.View>
-
-        <View style={styles.metricsGrid}>
-          <MetricCard delay={90} label="Current Goal" value={goalTitle} />
-          <MetricCard delay={150} label="Today's Progress" value={progressLabel} />
-          <MetricCard delay={210} label="Current Mood" value={moodLabel} />
-          <MetricCard delay={270} label="Current Focus" value={focusLabel} />
-        </View>
       </View>
 
       <View style={styles.body}>
@@ -140,12 +137,22 @@ export const TalkView = memo(function TalkView({
         <AppText variant="caption" color="accent" style={styles.status}>
           {status}
         </AppText>
-        {transcript ? (
-          <AppText color="primary" style={styles.transcript}>
-            {transcript}
-          </AppText>
-        ) : null}
-        <ConversationTimeline messages={messages} thinking={isThinking} />
+        <AppText color="primary" style={styles.transcript}>
+          {transcript || focusLabel || 'I am here when you are ready.'}
+        </AppText>
+        <PressableScale onPress={handleMicPress} accessibilityRole="button" accessibilityLabel="Talk to JISSI" style={styles.mobileTalkWrap}>
+          <GlassSurface intensity={40} radius={Radii.pill} strong style={styles.mobileTalk}>
+            <VoiceButton state={voiceState} onPress={handleMicPress} size={58} />
+            <View style={styles.mobileTalkCopy}>
+              <AppText variant="bodyStrong" color="primary">
+                Talk to JISSI
+              </AppText>
+              <AppText variant="footnote" color="muted" numberOfLines={1}>
+                {goalTitle || progressLabel || moodLabel}
+              </AppText>
+            </View>
+          </GlassSurface>
+        </PressableScale>
       </View>
 
       {featuredCards.length ? (
@@ -163,22 +170,10 @@ export const TalkView = memo(function TalkView({
         <FloatingAction label="Settings" icon={Settings} onPress={onSettings} delay={260} />
       </View>
 
-      <View style={styles.dock}>
-        <GlassSurface intensity={36} radius={Radii.pill} style={styles.inputPill}>
-          <PressableScale onPress={onBack} accessibilityRole="button" accessibilityLabel="Close voice mode" style={styles.stopMini}>
-            <X size={18} color={theme.colors.textMuted} strokeWidth={1.9} />
-          </PressableScale>
-          <View style={styles.inputCopy}>
-            <AppText variant="caption" color="primary" numberOfLines={1}>
-              Tap and talk to JISSI
-            </AppText>
-            <AppText variant="footnote" color="muted" numberOfLines={1}>
-              Voice, goals, memory and timeline
-            </AppText>
-          </View>
-          <VoiceButton state={voiceState} onPress={onMic} size={64} />
-        </GlassSurface>
+      <View style={styles.conversationPreview}>
+        <ConversationTimeline messages={messages.slice(-3)} thinking={isThinking} />
       </View>
+
     </View>
   );
 });
@@ -203,21 +198,6 @@ function DashboardMiniCard({ card, delay }: { card: TalkDashboardCard; delay: nu
             {card.body}
           </AppText>
         </View>
-      </GlassSurface>
-    </Animated.View>
-  );
-}
-
-function MetricCard({ label, value, delay }: { label: string; value: string; delay: number }) {
-  return (
-    <Animated.View entering={FadeInUp.delay(delay).duration(420)} style={styles.metricWrap}>
-      <GlassSurface intensity={22} radius={Radii.lg} style={styles.metricCard}>
-        <AppText variant="footnote" color="muted" numberOfLines={1}>
-          {label}
-        </AppText>
-        <AppText variant="caption" color="primary" numberOfLines={1}>
-          {value}
-        </AppText>
       </GlassSurface>
     </Animated.View>
   );
@@ -258,11 +238,8 @@ const styles = StyleSheet.create({
   headerCopy: { flex: 1, gap: Spacing.xs },
   greeting: { fontFamily: Fonts.bodyBold, fontSize: 26, lineHeight: 32, letterSpacing: 0 },
   headerButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  metricsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
-  metricWrap: { width: '48.6%' },
-  metricCard: { minHeight: 66, justifyContent: 'center', gap: Spacing.xs, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
-  status: { textAlign: 'center', marginTop: -Spacing.sm },
-  body: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.md, paddingBottom: 6 },
+  status: { textAlign: 'center', marginTop: -Spacing.md },
+  body: { alignItems: 'center', justifyContent: 'center', gap: Spacing.md, paddingTop: Spacing.lg, paddingBottom: Spacing.lg },
   orbStage: { alignItems: 'center', justifyContent: 'center' },
   transcript: {
     textAlign: 'center',
@@ -273,6 +250,9 @@ const styles = StyleSheet.create({
     maxWidth: 340,
     paddingHorizontal: Spacing.lg,
   },
+  mobileTalkWrap: { width: '100%', maxWidth: 360 },
+  mobileTalk: { minHeight: 74, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.md, paddingLeft: Spacing.md, paddingRight: Spacing.lg },
+  mobileTalkCopy: { flex: 1, gap: 2 },
   dashboardCards: { gap: Spacing.sm, paddingBottom: Spacing.md },
   dashboardMiniWrap: { width: '100%' },
   dashboardMini: { minHeight: 76, flexDirection: 'row', alignItems: 'center', gap: Spacing.md, padding: Spacing.md },
@@ -281,8 +261,5 @@ const styles = StyleSheet.create({
   actionCards: { flexDirection: 'row', gap: Spacing.sm, paddingBottom: Spacing.md },
   floatingActionWrap: { flex: 1 },
   floatingAction: { minHeight: 58, alignItems: 'center', justifyContent: 'center', gap: Spacing.xs, paddingHorizontal: Spacing.xs },
-  dock: { paddingBottom: Spacing.xl, paddingTop: Spacing.xs },
-  inputPill: { minHeight: 78, flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingLeft: Spacing.lg, paddingRight: Spacing.xs },
-  inputCopy: { flex: 1, gap: 2 },
-  stopMini: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  conversationPreview: { maxHeight: 190, paddingBottom: Spacing.xl },
 });

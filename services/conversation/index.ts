@@ -1,4 +1,5 @@
 export { ConversationRepository } from './ConversationRepository';
+export { NaturalConversationEngine } from './NaturalConversationEngine';
 export {
   Conversation,
   ConversationStore,

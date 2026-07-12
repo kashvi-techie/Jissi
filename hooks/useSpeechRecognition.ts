@@ -64,15 +64,19 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
    * - Native: uses `expo-av`'s permission API, with a settings deep-link fallback.
    */
   const requestMicrophonePermission = useCallback(async (): Promise<boolean> => {
+    console.log('[STEP 4] permission check');
+    console.log('[STT][hook:permission] request start platform=', Platform.OS);
     if (Platform.OS === 'web') {
       try {
         if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           stream.getTracks().forEach((track) => track.stop());
           if (mountedRef.current) setHasMicrophonePermission(true);
+          console.log('[STT][hook:permission] web granted');
           return true;
         }
-      } catch {
+      } catch (error) {
+        console.log('[STT][hook:permission] web denied=', error instanceof Error ? error.message : String(error));
         if (mountedRef.current) setError('Microphone permission denied. Please allow microphone access in your browser settings.');
         return false;
       }
@@ -81,6 +85,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
 
     try {
       const { status, canAskAgain } = await Audio.requestPermissionsAsync();
+      console.log('[STT][hook:permission] expo-av status=', status, 'canAskAgain=', canAskAgain);
       if (status === 'granted') {
         if (mountedRef.current) setHasMicrophonePermission(true);
         return true;
@@ -100,7 +105,8 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
         ]
       );
       return false;
-    } catch {
+    } catch (error) {
+      console.log('[STT][hook:permission] expo-av failed=', error instanceof Error ? error.message : String(error));
       if (mountedRef.current) setError('Failed to request microphone permission.');
       return false;
     }
@@ -112,20 +118,24 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
    */
   const initializeSpeech = useCallback(async () => {
     if (isInitializedRef.current) return;
+    console.log('[STT][hook:init] initializeSpeech start isSupported=', isSupported);
 
     await SpeechService.initialize({
       onSpeechStart: () => {
+        console.log('[STT][hook:event] onSpeechStart');
         if (!mountedRef.current) return;
         setState('listening');
         setIsListening(true);
         setError(null);
       },
       onSpeechEnd: () => {
+        console.log('[STT][hook:event] onSpeechEnd');
         if (!mountedRef.current) return;
         setState('idle');
         setIsListening(false);
       },
       onSpeechResults: (results: string[]) => {
+        console.log('[STT][hook:event] onSpeechResults=', results);
         if (!mountedRef.current) return;
         const finalChunk = results[0] || '';
         // Accumulate the final transcript and recompute the intent from the
@@ -139,10 +149,12 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
         setInterimTranscript('');
       },
       onSpeechPartialResults: (partials: string[]) => {
+        console.log('[STT][hook:event] onSpeechPartialResults=', partials);
         if (!mountedRef.current) return;
         setInterimTranscript(partials[0] || '');
       },
       onSpeechError: (message: string) => {
+        console.log('[STT][hook:event] onSpeechError=', message);
         if (!mountedRef.current) return;
         setInterimTranscript('');
         if (message.includes('no-speech') || message.includes('No speech')) {
@@ -160,6 +172,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
     });
 
     isInitializedRef.current = true;
+    console.log('[STT][hook:init] initializeSpeech complete');
   }, []);
 
   // Initialize on mount; tear down on unmount.
@@ -192,6 +205,9 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
 
   const startListening = useCallback(async () => {
     const requestId = ++startRequestRef.current;
+    console.log('[STEP 3] startListening called');
+    console.log('[STEP 5] isSupported', isSupported);
+    console.log('[STT][hook:start] requestId=', requestId, 'isSupported=', isSupported);
     if (!isSupported) {
       setError('Speech recognition is not supported on this device.');
       setState('error');
@@ -199,14 +215,18 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
     }
 
     const granted = await requestMicrophonePermission();
+    console.log('[STT][hook:start] permission result=', granted, 'mounted=', mountedRef.current, 'currentRequest=', startRequestRef.current);
     if (!mountedRef.current || requestId !== startRequestRef.current) return;
     if (!granted) return;
 
     try {
       setError(null);
       setInterimTranscript('');
+      console.log('[STT][hook:start] calling SpeechService.startListening');
       await SpeechService.startListening('en-US');
+      console.log('[STT][hook:start] SpeechService.startListening returned');
     } catch (err) {
+      console.log('[STT][hook:start] SpeechService.startListening threw=', err instanceof Error ? err.message : String(err));
       if (!mountedRef.current || requestId !== startRequestRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to start speech recognition.');
       setState('error');

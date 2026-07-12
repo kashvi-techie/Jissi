@@ -6,9 +6,7 @@ import {
   BookOpen,
   Brain,
   CalendarCheck2,
-  CalendarClock,
   Home,
-  Languages,
   MessageCircle,
   MessageSquare,
   PanelLeft,
@@ -109,13 +107,6 @@ function statusShort(p: Phase, supported: boolean): string {
       return 'Ready';
   }
 }
-
-const PROMPT_CARDS: { text: string; icon: LucideIcon }[] = [
-  { text: 'Settle a debate: how should you store bread?', icon: Sparkles },
-  { text: 'Give me phrases to learn a new language', icon: Languages },
-  { text: 'Help create a weekly meal plan for two', icon: CalendarClock },
-  { text: 'Help me draft a response to a friend', icon: MessageCircle },
-];
 
 interface MobileDashboard {
   greeting: string;
@@ -531,6 +522,11 @@ export default function HomeScreen() {
             TTSService.unlockWeb();
             if (isSupported) toggle();
           }}
+          onTalk={() => {
+            setTalkOpen(true);
+            TTSService.unlockWeb();
+            if (isSupported) toggle();
+          }}
           onPrompt={openTopic}
           onNavigate={(route) => router.push(route as never)}
         />
@@ -609,6 +605,7 @@ function DesktopExperience({
   onAcceptSuggestion,
   onDismissSuggestion,
   onMic,
+  onTalk,
   onPrompt,
   onNavigate,
 }: {
@@ -626,14 +623,21 @@ function DesktopExperience({
   onAcceptSuggestion: () => void;
   onDismissSuggestion: () => void;
   onMic: () => void;
+  onTalk: () => void;
   onPrompt: (text: string) => void;
   onNavigate: (route: string) => void;
 }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
+  const [showMoreInsights, setShowMoreInsights] = useState(false);
   const isActive = orbState === 'listening' || orbState === 'speaking' || orbState === 'tool_execution';
   const isThinking = orbState === 'thinking' || orbState === 'tool_execution';
   const dashboardCards = useMemo(() => dashboard.cards, [dashboard.cards]);
+  const findCard = (id: string) => dashboardCards.find((card) => card.id === id);
+  const heroCards = useMemo(() => ['today-focus', 'continue', 'relationship'].map(findCard).filter((card): card is DashboardCard => !!card), [dashboardCards]);
+  const rightCards = useMemo(() => ['thought', 'today-focus', 'mood', 'timeline'].map(findCard).filter((card): card is DashboardCard => !!card), [dashboardCards]);
+  const hiddenCards = useMemo(() => dashboardCards.filter((card) => !rightCards.some((visible) => visible.id === card.id)), [dashboardCards, rightCards]);
+  const recentAssistant = [...messages].reverse().find((message) => message.role === 'assistant')?.content;
   const navItems: { label: string; icon: LucideIcon; route?: string; onPress?: () => void }[] = [
     { label: 'Home', icon: Home },
     { label: 'Chat', icon: MessageSquare, onPress: () => onPrompt('Let us talk') },
@@ -695,51 +699,57 @@ function DesktopExperience({
           <AppText style={styles.desktopGreeting} color="primary">
             {dashboard.greeting}
           </AppText>
-          <AppText style={styles.desktopSubtitle} color="muted">
-            {dashboard.greetingSubtext}
-          </AppText>
         </Animated.View>
 
         <Animated.View entering={FadeInUp.delay(120).duration(480)} style={styles.desktopOrbStage}>
-          <LivingAvatar state={orbState} emotion={emotionState} lifeAction={lifeAction} size={320}>
-            <VoiceWave active={isActive} size={330} intensity={phase === 'speaking' ? 1.25 : phase === 'listening' ? 0.95 : 0.72} />
-            <OrbEngine state={orbState} size={320} />
+          <LivingAvatar state={orbState} emotion={emotionState} lifeAction={lifeAction} size={286}>
+            <VoiceWave active={isActive} size={298} intensity={phase === 'speaking' ? 1.18 : phase === 'listening' ? 0.9 : 0.66} />
+            <OrbEngine state={orbState} size={286} />
           </LivingAvatar>
         </Animated.View>
 
-        <AppText variant="caption" color="accent" style={styles.desktopStatus}>
-          {status}
+        <AppText style={styles.desktopCompanion} color="muted">
+          {transcript || dashboard.greetingSubtext || dashboard.quickThought}
         </AppText>
 
-        {transcript ? (
-          <Animated.View entering={FadeInUp.duration(280)} style={styles.desktopTranscript}>
-            <AppText style={styles.desktopTranscriptText} color="primary">
-              {transcript}
-            </AppText>
-          </Animated.View>
-        ) : null}
+        <PressableScale onPress={onTalk} accessibilityRole="button" accessibilityLabel="Talk to JISSI" style={styles.primaryTalkWrap}>
+          <GlassSurface intensity={44} radius={Radii.pill} strong style={styles.primaryTalk}>
+            <VoiceButton state={voiceState} onPress={onMic} size={62} />
+            <View style={styles.primaryTalkCopy}>
+              <AppText variant="bodyStrong" color="primary">
+                Let's Talk
+              </AppText>
+              <AppText variant="caption" color="muted">
+                {status}
+              </AppText>
+            </View>
+          </GlassSurface>
+        </PressableScale>
 
-        <View style={styles.desktopConversation}>
-          <ConversationTimeline messages={messages} thinking={isThinking} />
-        </View>
-
-        <View style={styles.desktopPromptRow}>
-          {PROMPT_CARDS.map((card, index) => (
-            <DesktopPrompt key={card.text} card={card} delay={index * 70} onPress={() => onPrompt(card.text)} />
+        <View style={styles.heroCardGrid}>
+          {heroCards.map((card, index) => (
+            <View key={card.id} style={styles.heroCardWrap}>
+              <InsightCard
+                icon={card.icon}
+                label={card.label}
+                title={card.title}
+                value={card.body}
+                delay={180 + index * 60}
+                onPress={card.route ? () => onNavigate(card.route as string) : undefined}
+              />
+            </View>
           ))}
-        </View>
-
-        <GlassSurface intensity={38} radius={Radii.pill} strong style={styles.desktopInput}>
-          <View style={styles.desktopInputText}>
-            <AppText variant="bodyStrong" color="primary">
-              Ask, plan, remember, create
-            </AppText>
-            <AppText variant="caption" color="muted">
-              Type coming soon. Voice is ready now.
-            </AppText>
+          <View style={styles.heroCardWrap}>
+            <InsightCard
+              icon={MessageSquare}
+              label="Recent Conversations"
+              title={recentAssistant ? 'Latest reply' : 'No conversation yet'}
+              value={recentAssistant ?? 'Start with one thought and JISSI will keep the thread warm.'}
+              delay={360}
+              onPress={() => onNavigate('/(tabs)/history')}
+            />
           </View>
-          <VoiceButton state={voiceState} onPress={onMic} size={70} />
-        </GlassSurface>
+        </View>
       </View>
 
       <View style={styles.rightPanel}>
@@ -754,7 +764,7 @@ function DesktopExperience({
           </View>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.rightPanelScroll}>
             {delight?.quote ? <DailyQuoteCard quote={delight.quote} /> : null}
-            {dashboardCards.map((card, index) => (
+            {rightCards.map((card, index) => (
               <InsightCard
                 key={card.id}
                 icon={card.icon}
@@ -765,6 +775,26 @@ function DesktopExperience({
                 onPress={card.route ? () => onNavigate(card.route as string) : undefined}
               />
             ))}
+            {hiddenCards.length ? (
+              <PressableScale onPress={() => setShowMoreInsights((value) => !value)} accessibilityRole="button" accessibilityLabel="Toggle more insights">
+                <GlassSurface intensity={18} radius={Radii.lg} style={styles.moreInsights}>
+                  <AppText variant="caption" color="secondary">
+                    {showMoreInsights ? 'Hide extra cards' : `${hiddenCards.length} more insights`}
+                  </AppText>
+                </GlassSurface>
+              </PressableScale>
+            ) : null}
+            {showMoreInsights ? hiddenCards.map((card, index) => (
+              <InsightCard
+                key={card.id}
+                icon={card.icon}
+                label={card.label}
+                title={card.title}
+                value={card.body}
+                delay={260 + index * 40}
+                onPress={card.route ? () => onNavigate(card.route as string) : undefined}
+              />
+            )) : null}
             {suggestion ? (
               <ProactiveCard suggestion={suggestion} onAccept={onAcceptSuggestion} onDismiss={onDismissSuggestion} />
             ) : null}
@@ -909,15 +939,21 @@ const styles = StyleSheet.create({
   navList: { width: '100%', gap: Spacing.sm },
   navButton: { width: '100%' },
   navInner: { minHeight: 46, borderRadius: Radii.lg, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, paddingHorizontal: Spacing.md },
-  desktopCenter: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.lg },
-  desktopHero: { alignItems: 'center', gap: Spacing.xs, marginBottom: Spacing.lg },
-  desktopGreeting: { fontFamily: Fonts.bodyBold, fontSize: 44, lineHeight: 52, letterSpacing: 0, textAlign: 'center' },
+  desktopCenter: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.lg, gap: Spacing.lg },
+  desktopHero: { alignItems: 'center', gap: Spacing.xs },
+  desktopGreeting: { fontFamily: Fonts.bodyBold, fontSize: 42, lineHeight: 50, letterSpacing: 0, textAlign: 'center' },
   desktopSubtitle: { fontFamily: Fonts.bodyMedium, fontSize: 18, lineHeight: 26, letterSpacing: 0, textAlign: 'center' },
-  desktopOrbStage: { width: 360, height: 330, alignItems: 'center', justifyContent: 'center' },
-  desktopStatus: { textAlign: 'center', marginTop: -Spacing.lg, marginBottom: Spacing.md },
+  desktopOrbStage: { width: 340, height: 300, alignItems: 'center', justifyContent: 'center' },
+  desktopCompanion: { maxWidth: 640, fontFamily: Fonts.bodyMedium, fontSize: 18, lineHeight: 27, letterSpacing: 0, textAlign: 'center' },
+  desktopStatus: { textAlign: 'center', marginTop: -Spacing.md, marginBottom: Spacing.md },
   desktopTranscript: { maxWidth: 680, paddingHorizontal: Spacing.xl, marginBottom: Spacing.md },
   desktopTranscriptText: { fontFamily: Fonts.bodyMedium, fontSize: 22, lineHeight: 32, letterSpacing: 0, textAlign: 'center' },
   desktopConversation: { width: '100%', maxWidth: 760 },
+  primaryTalkWrap: { width: '100%', maxWidth: 360 },
+  primaryTalk: { minHeight: 78, flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingLeft: Spacing.sm, paddingRight: Spacing.xl },
+  primaryTalkCopy: { flex: 1, gap: 2 },
+  heroCardGrid: { width: '100%', maxWidth: 820, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: Spacing.md },
+  heroCardWrap: { width: '47%', minWidth: 260 },
   desktopPromptRow: { width: '100%', maxWidth: 860, flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.xl },
   desktopPromptWrap: { flex: 1 },
   desktopPrompt: { minHeight: 104, padding: Spacing.lg, justifyContent: 'space-between', gap: Spacing.md },
@@ -928,6 +964,7 @@ const styles = StyleSheet.create({
   rightPanelHeader: { gap: Spacing.xs, paddingBottom: Spacing.md },
   rightPanelScroll: { gap: Spacing.md, paddingBottom: Spacing.lg },
   insightCard: { minHeight: 70, flexDirection: 'row', alignItems: 'center', gap: Spacing.md, padding: Spacing.md },
+  moreInsights: { minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.md },
   insightIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   insightText: { flex: 1, gap: Spacing.xs },
   deskRoot: { flex: 1 },

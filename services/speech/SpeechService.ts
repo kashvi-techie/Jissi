@@ -64,9 +64,11 @@ let ExpoSpeechRecognition: ESRModule | null = null;
 try {
   if (Platform.OS !== 'web') {
     ExpoSpeechRecognition = require('expo-speech-recognition').ExpoSpeechRecognitionModule as ESRModule;
+    console.log('[STT][module] expo-speech-recognition loaded:', !!ExpoSpeechRecognition);
   }
-} catch {
+} catch (error) {
   // Native module not bundled (e.g. Expo Go) — isSupported() will report false.
+  console.log('[STT][module] expo-speech-recognition failed to load:', error instanceof Error ? error.message : String(error));
   ExpoSpeechRecognition = null;
 }
 
@@ -142,6 +144,7 @@ class SpeechServiceImpl {
 
   async initialize(callbacks: SpeechRecognitionCallbacks): Promise<void> {
     this.callbacks = callbacks;
+    console.log('[STT][initialize] platform=', Platform.OS, 'nativeAvailable=', this.nativeAvailable, 'alreadyInitialized=', this.isInitialized);
 
     if (Platform.OS === 'web') {
       await this.initializeWeb();
@@ -219,6 +222,7 @@ class SpeechServiceImpl {
 
   private initializeNative(): void {
     if (!ExpoSpeechRecognition) return;
+    console.log('[STT][native:init] registering listeners');
 
     // Idempotent across React remounts / Android Activity recreation: drop any
     // stale subscriptions before (re)registering so listeners never stack.
@@ -230,6 +234,7 @@ class SpeechServiceImpl {
     };
 
     add<null>('start', () => {
+      console.log('[STEP 8] native start event');
       this.clearStartFallback();
       this.startInFlight = false;
       this.isListening = true;
@@ -244,6 +249,7 @@ class SpeechServiceImpl {
       this.callbacks.onSpeechEnd?.();
     });
     add<ExpoSpeechRecognitionResultEvent>('result', (ev) => {
+      console.log('[STEP 9] first speech result');
       const transcripts = (ev.results ?? []).map((r) => r.transcript).filter(Boolean);
       if (transcripts.length === 0) return;
       if (ev.isFinal) {
@@ -253,6 +259,7 @@ class SpeechServiceImpl {
       }
     });
     add<ExpoSpeechRecognitionErrorEvent>('error', (ev) => {
+      console.log('[STEP 10] error callback');
       this.clearStartFallback();
       this.startInFlight = false;
       this.stopInFlight = false;
@@ -281,13 +288,19 @@ class SpeechServiceImpl {
 
   /** Requests mic + speech-recognition permission on native (no-op prompt on web). */
   private async ensureNativePermission(): Promise<boolean> {
-    if (!ExpoSpeechRecognition) return false;
+    if (!ExpoSpeechRecognition) {
+      console.log('[STT][permission] native module missing');
+      return false;
+    }
     try {
       const current = await ExpoSpeechRecognition.getPermissionsAsync();
+      console.log('[STT][permission] current=', current);
       if (current.granted) return true;
       const requested = await ExpoSpeechRecognition.requestPermissionsAsync();
+      console.log('[STT][permission] requested=', requested);
       return !!requested.granted;
-    } catch {
+    } catch (error) {
+      console.log('[STT][permission] failed=', error instanceof Error ? error.message : String(error));
       return false;
     }
   }
@@ -299,6 +312,7 @@ class SpeechServiceImpl {
         !!(window.SpeechRecognition || window.webkitSpeechRecognition)
       );
     }
+    console.log('[STT][support] platform=', Platform.OS, 'nativeAvailable=', this.nativeAvailable);
     return this.nativeAvailable;
   }
 
@@ -307,6 +321,7 @@ class SpeechServiceImpl {
   }
 
   async startListening(locale: string = 'en-US'): Promise<void> {
+    console.log('[STT][start] requested locale=', locale, 'initialized=', this.isInitialized, 'platform=', Platform.OS, 'appState=', AppState.currentState, 'isListening=', this.isListening, 'startInFlight=', this.startInFlight);
     if (!this.isInitialized) {
       throw new Error('SpeechService not initialized. Call initialize() first.');
     }
@@ -339,18 +354,24 @@ class SpeechServiceImpl {
         }
       } else if (this.nativeAvailable && ExpoSpeechRecognition) {
         const granted = await this.ensureNativePermission();
+        console.log('[STT][start] permissionGranted=', granted);
         if (!granted) {
           this.isListening = false;
           this.startInFlight = false;
           this.callbacks.onSpeechError?.('not-allowed: microphone or speech permission was denied.');
           return;
         }
-        if (!ExpoSpeechRecognition.isRecognitionAvailable()) {
+        const recognitionAvailable = ExpoSpeechRecognition.isRecognitionAvailable();
+        console.log('[STEP 6] isRecognitionAvailable', recognitionAvailable);
+        console.log('[STT][start] recognitionAvailable=', recognitionAvailable);
+        if (!recognitionAvailable) {
           this.isListening = false;
           this.startInFlight = false;
           this.callbacks.onSpeechError?.('Speech recognition is not available on this device.');
           return;
         }
+        console.log('[STT][start] calling native start()');
+        console.log('[STEP 7] ExpoSpeechRecognition.start invoked');
         ExpoSpeechRecognition.start({ lang: locale, interimResults: true, continuous: false });
         this.clearStartFallback();
         this.startFallbackTimer = setTimeout(() => {

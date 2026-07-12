@@ -1,7 +1,8 @@
-import React, { memo, useEffect } from 'react';
+import React, { memo, useEffect, useMemo } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BookOpen, Brain, CalendarCheck2, MessageSquare, Settings, Sparkles, X } from 'lucide-react-native';
+import { BookOpen, CalendarCheck2, MessageSquare, Settings, Sparkles, Users, X } from 'lucide-react-native';
+import type { LucideIcon } from 'lucide-react-native';
 import Animated, { FadeInUp, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { OrbEngine } from '@/components/orb/OrbEngine';
 import { OrbState } from '@/components/orb/PlasmaOrb';
@@ -27,16 +28,27 @@ export interface TalkViewProps {
   onBack: () => void;
   onMessage?: () => void;
   greeting?: string;
+  greetingSubtext?: string;
   goalTitle?: string;
   progressLabel?: string;
   moodLabel?: string;
   focusLabel?: string;
+  dashboardCards?: TalkDashboardCard[];
   onPlanner?: () => void;
   onTimeline?: () => void;
   onMemory?: () => void;
+  onRelationships?: () => void;
   onSettings?: () => void;
   emotionState?: EmotionState;
   lifeAction?: LifeActionType;
+}
+
+interface TalkDashboardCard {
+  id: string;
+  label: string;
+  title: string;
+  body: string;
+  icon?: LucideIcon;
 }
 
 export const TalkView = memo(function TalkView({
@@ -49,13 +61,15 @@ export const TalkView = memo(function TalkView({
   onBack,
   onMessage,
   greeting = 'Good Evening',
+  greetingSubtext = 'JISSI is ready when you are.',
   goalTitle = 'Choose a goal',
   progressLabel = '0% today',
   moodLabel = 'Neutral',
   focusLabel = 'Ready',
+  dashboardCards = [],
   onPlanner,
   onTimeline,
-  onMemory,
+  onRelationships,
   onSettings,
   emotionState = 'neutral',
   lifeAction,
@@ -66,6 +80,7 @@ export const TalkView = memo(function TalkView({
   const isActive = orbState === 'listening' || orbState === 'speaking' || orbState === 'tool_execution';
   const isThinking = orbState === 'thinking' || orbState === 'tool_execution';
   const waveIntensity = orbState === 'speaking' ? 1.25 : orbState === 'listening' ? 0.9 : 0.65;
+  const featuredCards = useMemo(() => dashboardCards.slice(0, 3), [dashboardCards]);
   const orbPulse = useSharedValue(0);
 
   useEffect(() => {
@@ -97,7 +112,7 @@ export const TalkView = memo(function TalkView({
               {greeting}
             </AppText>
             <AppText variant="caption" color="muted">
-              JISSI is ready when you are.
+              {greetingSubtext}
             </AppText>
           </View>
           <PressableScale onPress={onMessage} accessibilityRole="button" accessibilityLabel="Conversation">
@@ -133,10 +148,18 @@ export const TalkView = memo(function TalkView({
         <ConversationTimeline messages={messages} thinking={isThinking} />
       </View>
 
+      {featuredCards.length ? (
+        <View style={styles.dashboardCards}>
+          {featuredCards.map((card, index) => (
+            <DashboardMiniCard key={card.id} card={card} delay={90 + index * 70} />
+          ))}
+        </View>
+      ) : null}
+
       <View style={styles.actionCards}>
         <FloatingAction label="Planner" icon={CalendarCheck2} onPress={onPlanner} delay={80} />
         <FloatingAction label="Timeline" icon={BookOpen} onPress={onTimeline} delay={140} />
-        <FloatingAction label="Memory" icon={Brain} onPress={onMemory} delay={200} />
+        <FloatingAction label="People" icon={Users} onPress={onRelationships} delay={200} />
         <FloatingAction label="Settings" icon={Settings} onPress={onSettings} delay={260} />
       </View>
 
@@ -159,6 +182,31 @@ export const TalkView = memo(function TalkView({
     </View>
   );
 });
+
+function DashboardMiniCard({ card, delay }: { card: TalkDashboardCard; delay: number }) {
+  const theme = useTheme();
+  const Icon = card.icon ?? Sparkles;
+  return (
+    <Animated.View entering={FadeInUp.delay(delay).duration(360)} style={styles.dashboardMiniWrap}>
+      <GlassSurface intensity={22} radius={Radii.lg} style={styles.dashboardMini}>
+        <View style={[styles.dashboardMiniIcon, { backgroundColor: theme.colors.accentSoft }]}>
+          <Icon size={15} color={theme.colors.accent} strokeWidth={1.8} />
+        </View>
+        <View style={styles.dashboardMiniText}>
+          <AppText variant="footnote" color="muted" numberOfLines={1}>
+            {card.label}
+          </AppText>
+          <AppText variant="caption" color="primary" numberOfLines={1}>
+            {card.title}
+          </AppText>
+          <AppText variant="footnote" color="muted" numberOfLines={2}>
+            {card.body}
+          </AppText>
+        </View>
+      </GlassSurface>
+    </Animated.View>
+  );
+}
 
 function MetricCard({ label, value, delay }: { label: string; value: string; delay: number }) {
   return (
@@ -225,6 +273,11 @@ const styles = StyleSheet.create({
     maxWidth: 340,
     paddingHorizontal: Spacing.lg,
   },
+  dashboardCards: { gap: Spacing.sm, paddingBottom: Spacing.md },
+  dashboardMiniWrap: { width: '100%' },
+  dashboardMini: { minHeight: 76, flexDirection: 'row', alignItems: 'center', gap: Spacing.md, padding: Spacing.md },
+  dashboardMiniIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  dashboardMiniText: { flex: 1, gap: 2 },
   actionCards: { flexDirection: 'row', gap: Spacing.sm, paddingBottom: Spacing.md },
   floatingActionWrap: { flex: 1 },
   floatingAction: { minHeight: 58, alignItems: 'center', justifyContent: 'center', gap: Spacing.xs, paddingHorizontal: Spacing.xs },

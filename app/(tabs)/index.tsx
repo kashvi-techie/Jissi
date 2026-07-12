@@ -7,7 +7,6 @@ import {
   Brain,
   CalendarCheck2,
   CalendarClock,
-  Clock,
   Home,
   Languages,
   MessageCircle,
@@ -36,6 +35,7 @@ import { ContextEngine } from '@/services/context';
 import { BehaviorEngine } from '@/services/behavior';
 import { TimelineService } from '@/services/timeline';
 import { DelightService, DelightAchievement, DelightSnapshot } from '@/services/delight';
+import { RelationshipService, RelationshipProfile } from '@/services/relationships';
 import { AssistantState } from '@/hooks/useConversation';
 import { useConversationMode } from '@/hooks/useConversationMode';
 import { OrbState } from '@/components/orb/PlasmaOrb';
@@ -118,6 +118,7 @@ const PROMPT_CARDS: { text: string; icon: LucideIcon }[] = [
 
 interface MobileDashboard {
   greeting: string;
+  greetingSubtext: string;
   goalTitle: string;
   progressLabel: string;
   moodLabel: string;
@@ -127,12 +128,98 @@ interface MobileDashboard {
   lifeLabel: string;
   achievementLabel: string;
   timelineLabel: string;
+  quickThought: string;
+  cards: DashboardCard[];
+}
+
+interface DashboardCard {
+  id: string;
+  label: string;
+  title: string;
+  body: string;
+  icon: LucideIcon;
+  route?: string;
 }
 
 function greetingFor(name?: string): string {
   const hour = new Date().getHours();
   const part = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : hour < 21 ? 'Good Evening' : 'Good Night';
   return name ? `${part} ${name}` : part;
+}
+
+function titleFromKey(value?: string): string {
+  if (!value) return 'Ready';
+  return value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function emotionLabel(state?: EmotionState): string {
+  if (!state || state === 'neutral') return 'Balanced';
+  return titleFromKey(state);
+}
+
+function emotionCopy(state?: EmotionState): string {
+  switch (state) {
+    case 'focused':
+      return 'Quiet focus mode. JISSI will keep things crisp.';
+    case 'relaxed':
+      return 'Calm pace today, with gentle suggestions only.';
+    case 'curious':
+      return 'You seem ready to explore and learn deeply.';
+    case 'excited':
+      return 'High energy today. Let us use it well.';
+    case 'stressed':
+      return 'A softer pace may help you move without pressure.';
+    case 'confused':
+      return 'Step-by-step answers will work best right now.';
+    case 'tired':
+      return 'Gentle mode. Smaller steps, less noise.';
+    case 'lonely':
+      return 'JISSI will keep the conversation warmer today.';
+    case 'frustrated':
+      return 'Let us simplify the next step together.';
+    default:
+      return 'A steady companion mode for today.';
+  }
+}
+
+function relativeDay(value?: string): string {
+  if (!value) return 'Recently';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Recently';
+  const today = new Date();
+  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const startDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const days = Math.round((startToday - startDate) / (24 * 60 * 60 * 1000));
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  return `${days} days ago`;
+}
+
+function relationshipSpotlight(relationships: RelationshipProfile[], fallbackCount: number): DashboardCard {
+  const person = relationships[0];
+  if (person) {
+    const day = relativeDay(person.lastDiscussed);
+    return {
+      id: 'relationship',
+      label: 'Relationship Spotlight',
+      title: person.name,
+      body: day === 'Today'
+        ? `${titleFromKey(person.relationship)} in your circle. You talked about them today.`
+        : `You have not talked about ${person.name} since ${day.toLowerCase()}.`,
+      icon: Users,
+      route: '/relationship-debug',
+    };
+  }
+  return {
+    id: 'relationship',
+    label: 'Relationship Spotlight',
+    title: fallbackCount ? `${fallbackCount} people noticed` : 'Your people will appear here',
+    body: fallbackCount ? 'JISSI has relationship context ready for future greetings.' : 'Introduce a teacher, friend or mentor and JISSI will remember the relationship locally.',
+    icon: Users,
+    route: '/relationship-debug',
+  };
 }
 
 export default function HomeScreen() {
@@ -157,6 +244,7 @@ export default function HomeScreen() {
   const [suggestion, setSuggestion] = useState<HomeSuggestion | null>(null);
   const [dashboard, setDashboard] = useState<MobileDashboard>({
     greeting: greetingFor(),
+    greetingSubtext: 'Your AI that grows with you.',
     goalTitle: 'Choose a goal',
     progressLabel: '0% today',
     moodLabel: 'Neutral',
@@ -166,6 +254,8 @@ export default function HomeScreen() {
     lifeLabel: 'Listening for patterns',
     achievementLabel: 'No achievement yet',
     timelineLabel: 'Timeline is warming up',
+    quickThought: 'Your story starts today.',
+    cards: [],
   });
   const [delight, setDelight] = useState<DelightSnapshot | null>(null);
   const [celebration, setCelebration] = useState<DelightAchievement | null>(null);
@@ -201,7 +291,7 @@ export default function HomeScreen() {
   useEffect(() => {
     let cancelled = false;
     const loadDashboard = async () => {
-      const [profile, planner, emotion, context, behavior, timeline, delightSnapshot] = await Promise.all([
+      const [profile, planner, emotion, context, behavior, timeline, delightSnapshot, relationships] = await Promise.all([
         OnboardingService.getProfile(),
         PlannerEngine.getSnapshot().catch(() => null),
         EmotionEngine.getCurrentEmotion().catch(() => null),
@@ -209,10 +299,102 @@ export default function HomeScreen() {
         BehaviorEngine.getSnapshot().catch(() => null),
         TimelineService.getSnapshot().catch(() => null),
         DelightService.getSnapshot().catch(() => null),
+        RelationshipService.getProfiles().catch(() => []),
       ]);
       if (cancelled) return;
       const activeGoal = planner?.goals.find((goal) => goal.status !== 'completed') ?? planner?.goals[0];
+      const currentTask = activeGoal?.milestones
+        .flatMap((milestone) => milestone.tasks)
+        .find((task) => task.status !== 'completed');
+      const routine = behavior?.routines[0];
+      const activeRoutine = context?.routine.active[0];
+      const latestTimeline = timeline?.events[0];
       const recentAchievement = delightSnapshot?.achievements[0]?.title ?? timeline?.events.find((event) => event.filter === 'achievements')?.title;
+      const completedGoals = planner?.goals.filter((goal) => goal.status === 'completed').length ?? timeline?.stats.completedGoals ?? 0;
+      const peopleCount = relationships.length || context?.relationships.length || 0;
+      const todayFocus: DashboardCard = activeGoal ? {
+        id: 'today-focus',
+        label: "Today's Focus",
+        title: activeGoal.title,
+        body: currentTask ? currentTask.title : `${activeGoal.progress.completionPercent}% complete. Continue the next small step.`,
+        icon: Target,
+        route: '/planner-debug',
+      } : routine ? {
+        id: 'today-focus',
+        label: "Today's Focus",
+        title: routine.label,
+        body: routine.reason,
+        icon: Repeat,
+        route: '/behavior-debug',
+      } : suggestion ? {
+        id: 'today-focus',
+        label: "Today's Focus",
+        title: suggestion.title,
+        body: suggestion.message,
+        icon: MessageCircle,
+      } : {
+        id: 'today-focus',
+        label: "Today's Focus",
+        title: 'Your story starts today',
+        body: 'Add one goal or start one conversation and JISSI will shape the dashboard around it.',
+        icon: Sparkles,
+      };
+      const continueJourney: DashboardCard = {
+        id: 'continue',
+        label: 'Continue Journey',
+        title: activeGoal ? `Continue ${activeGoal.title}` : profile?.goal ? `Continue ${profile.goal}` : 'Choose your first journey',
+        body: activeGoal ? `${activeGoal.progress.completedTasks}/${activeGoal.progress.totalTasks} tasks completed` : 'A single goal is enough for JISSI to begin building momentum.',
+        icon: CalendarCheck2,
+        route: '/planner-debug',
+      };
+      const relationshipCard = relationshipSpotlight(relationships, context?.relationships.length ?? 0);
+      const achievementCard: DashboardCard = {
+        id: 'achievement',
+        label: 'Achievement',
+        title: recentAchievement ?? (activeGoal?.progress.currentStreak ? `${activeGoal.progress.currentStreak} day streak` : 'Your first win is waiting'),
+        body: recentAchievement ? 'A recent moment from your journey.' : 'Finish one task or milestone and JISSI will celebrate it here.',
+        icon: Trophy,
+        route: '/timeline',
+      };
+      const timelineCard: DashboardCard = {
+        id: 'timeline',
+        label: 'Timeline Preview',
+        title: latestTimeline ? `${relativeDay(latestTimeline.timestamp)}: ${latestTimeline.title}` : 'Your story is waiting to be written',
+        body: latestTimeline?.description ?? 'Milestones, habits and important memories will appear here automatically.',
+        icon: BookOpen,
+        route: '/timeline',
+      };
+      const moodCard: DashboardCard = {
+        id: 'mood',
+        label: 'Mood',
+        title: emotionLabel(emotion?.state),
+        body: emotionCopy(emotion?.state),
+        icon: Sparkles,
+        route: '/emotion-debug',
+      };
+      const quickThought = routine
+        ? `You usually ${routine.label.toLowerCase()} around this time.`
+        : completedGoals
+          ? `You have completed ${completedGoals} goal${completedGoals === 1 ? '' : 's'} so far.`
+          : timeline?.events.length
+            ? 'Your journey is starting to take shape.'
+            : 'Your story starts today.';
+      const thoughtCard: DashboardCard = {
+        id: 'thought',
+        label: 'Companion Thought',
+        title: quickThought,
+        body: suggestion?.message ?? 'Built locally from your planner, routines and timeline.',
+        icon: Sparkles,
+      };
+      const cards = [
+        todayFocus,
+        continueJourney,
+        relationshipCard,
+        achievementCard,
+        timelineCard,
+        moodCard,
+        thoughtCard,
+      ];
       setDelight(delightSnapshot);
       setPresenceEmotion(emotion?.state ?? 'neutral');
       if (delightSnapshot?.newlyUnlocked[0]) {
@@ -220,15 +402,18 @@ export default function HomeScreen() {
       }
       setDashboard({
         greeting: delightSnapshot?.welcome ?? greetingFor(profile?.nickname || profile?.name),
+        greetingSubtext: suggestion?.title ?? (activeGoal ? "You've been making great progress lately." : 'Your AI that grows with you.'),
         goalTitle: activeGoal?.title ?? profile?.goal ?? 'Choose a goal',
         progressLabel: activeGoal ? `${activeGoal.progress.completionPercent}% complete` : `${planner?.agenda.items.length ?? 0} tasks today`,
-        moodLabel: emotion ? `${emotion.state} ${Math.round(emotion.confidence * 100)}%` : 'Neutral',
-        focusLabel: context?.task?.label ?? context?.routine.active[0]?.routineType?.replace('_', ' ') ?? 'Ready',
-        behaviorLabel: behavior?.routines[0] ? `${behavior.routines[0].label} ${Math.round(behavior.routines[0].confidence * 100)}%` : 'No routine yet',
-        relationshipLabel: context?.relationships.length ? `${context.relationships.length} people known` : 'No people yet',
+        moodLabel: emotionLabel(emotion?.state),
+        focusLabel: todayFocus.title,
+        behaviorLabel: routine?.label ?? activeRoutine?.suggestion ?? 'No routine yet',
+        relationshipLabel: peopleCount ? `${peopleCount} people in your circle` : 'No people yet',
         lifeLabel: suggestion?.title ?? 'No nudge right now',
         achievementLabel: recentAchievement ?? 'No achievement yet',
-        timelineLabel: timeline ? `${timeline.events.length} journey events` : 'Timeline is warming up',
+        timelineLabel: latestTimeline?.title ?? (timeline ? `${timeline.events.length} journey events` : 'Timeline is warming up'),
+        quickThought,
+        cards,
       });
     };
     loadDashboard();
@@ -361,15 +546,18 @@ export default function HomeScreen() {
           onBack={stop}
           onMessage={goHistory}
           greeting={dashboard.greeting}
+          greetingSubtext={dashboard.greetingSubtext}
           goalTitle={dashboard.goalTitle}
           progressLabel={dashboard.progressLabel}
           moodLabel={dashboard.moodLabel}
           focusLabel={dashboard.focusLabel}
+          dashboardCards={dashboard.cards}
           emotionState={presenceEmotion}
           lifeAction={lifeAction}
           onPlanner={() => router.push('/planner-debug' as never)}
           onTimeline={() => router.push('/timeline' as never)}
           onMemory={() => router.push('/(tabs)/profile' as never)}
+          onRelationships={() => router.push('/relationship-debug' as never)}
           onSettings={() => router.push('/(tabs)/settings' as never)}
         />
       )}
@@ -442,11 +630,13 @@ function DesktopExperience({
   const [expanded, setExpanded] = useState(false);
   const isActive = orbState === 'listening' || orbState === 'speaking' || orbState === 'tool_execution';
   const isThinking = orbState === 'thinking' || orbState === 'tool_execution';
+  const dashboardCards = useMemo(() => dashboard.cards, [dashboard.cards]);
   const navItems: { label: string; icon: LucideIcon; route?: string; onPress?: () => void }[] = [
     { label: 'Home', icon: Home },
     { label: 'Chat', icon: MessageSquare, onPress: () => onPrompt('Let us talk') },
     { label: 'Timeline', icon: BookOpen, route: '/timeline' },
     { label: 'Planner', icon: CalendarCheck2, route: '/planner-debug' },
+    { label: 'People', icon: Users, route: '/relationship-debug' },
     { label: 'Memory', icon: Brain, route: '/(tabs)/profile' },
     { label: 'Profile', icon: User, route: '/(tabs)/profile' },
     { label: 'Settings', icon: Settings, route: '/(tabs)/settings' },
@@ -503,7 +693,7 @@ function DesktopExperience({
             {dashboard.greeting}
           </AppText>
           <AppText style={styles.desktopSubtitle} color="muted">
-            Your AI companion that grows with you.
+            {dashboard.greetingSubtext}
           </AppText>
         </Animated.View>
 
@@ -556,20 +746,22 @@ function DesktopExperience({
               Today
             </AppText>
             <AppText variant="caption" color="muted">
-              Live from JISSI
+              Composed from your local engines
             </AppText>
           </View>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.rightPanelScroll}>
             {delight?.quote ? <DailyQuoteCard quote={delight.quote} /> : null}
-            <InsightCard icon={Target} label="Today's Goal" value={dashboard.goalTitle} delay={80} />
-            <InsightCard icon={CalendarCheck2} label="Planner Progress" value={dashboard.progressLabel} delay={120} />
-            <InsightCard icon={Sparkles} label="Emotion" value={dashboard.moodLabel} delay={160} />
-            <InsightCard icon={Repeat} label="Behavior" value={dashboard.behaviorLabel} delay={200} />
-            <InsightCard icon={Users} label="Relationship Summary" value={dashboard.relationshipLabel} delay={240} />
-            <InsightCard icon={MessageCircle} label="Life Suggestion" value={suggestion?.title ?? dashboard.lifeLabel} delay={280} />
-            <InsightCard icon={Trophy} label="Recent Achievement" value={dashboard.achievementLabel} delay={320} />
-            <InsightCard icon={Clock} label="Current Routine" value={dashboard.focusLabel} delay={360} />
-            <InsightCard icon={BookOpen} label="Timeline Preview" value={dashboard.timelineLabel} delay={400} />
+            {dashboardCards.map((card, index) => (
+              <InsightCard
+                key={card.id}
+                icon={card.icon}
+                label={card.label}
+                title={card.title}
+                value={card.body}
+                delay={80 + index * 40}
+                onPress={card.route ? () => onNavigate(card.route as string) : undefined}
+              />
+            ))}
             {suggestion ? (
               <ProactiveCard suggestion={suggestion} onAccept={onAcceptSuggestion} onDismiss={onDismissSuggestion} />
             ) : null}
@@ -625,23 +817,47 @@ function DesktopPrompt({ card, delay, onPress }: { card: { text: string; icon: L
   );
 }
 
-function InsightCard({ icon: Icon, label, value, delay }: { icon: LucideIcon; label: string; value: string; delay: number }) {
+function InsightCard({
+  icon: Icon,
+  label,
+  title,
+  value,
+  delay,
+  onPress,
+}: {
+  icon: LucideIcon;
+  label: string;
+  title: string;
+  value: string;
+  delay: number;
+  onPress?: () => void;
+}) {
   const theme = useTheme();
+  const content = (
+    <GlassSurface intensity={20} radius={Radii.lg} style={styles.insightCard}>
+      <View style={[styles.insightIcon, { backgroundColor: theme.colors.accentSoft }]}>
+        <Icon size={16} color={theme.colors.accent} strokeWidth={1.8} />
+      </View>
+      <View style={styles.insightText}>
+        <AppText variant="footnote" color="muted" numberOfLines={1}>
+          {label}
+        </AppText>
+        <AppText variant="caption" color="primary" numberOfLines={1}>
+          {title}
+        </AppText>
+        <AppText variant="footnote" color="muted" numberOfLines={2}>
+          {value}
+        </AppText>
+      </View>
+    </GlassSurface>
+  );
   return (
     <Animated.View entering={FadeInUp.delay(delay).duration(360)}>
-      <GlassSurface intensity={20} radius={Radii.lg} style={styles.insightCard}>
-        <View style={[styles.insightIcon, { backgroundColor: theme.colors.accentSoft }]}>
-          <Icon size={16} color={theme.colors.accent} strokeWidth={1.8} />
-        </View>
-        <View style={styles.insightText}>
-          <AppText variant="footnote" color="muted" numberOfLines={1}>
-            {label}
-          </AppText>
-          <AppText variant="caption" color="primary" numberOfLines={2}>
-            {value}
-          </AppText>
-        </View>
-      </GlassSurface>
+      {onPress ? (
+        <PressableScale onPress={onPress} accessibilityRole="button" accessibilityLabel={`${label}: ${title}`}>
+          {content}
+        </PressableScale>
+      ) : content}
     </Animated.View>
   );
 }

@@ -4,6 +4,7 @@ import { ConversationRepository, Conversation } from '@/services/conversation';
 import { TTSService, TTSState } from '@/services/voice';
 import { ActionService, ActionResult } from '@/services/actions';
 import { SocialGreetingService } from '@/services/social';
+import { RelationshipService } from '@/services/relationships';
 import { PersonalityService } from '@/services/personality';
 import { ContextEngine } from '@/services/context';
 import { PlannerEngine } from '@/services/planner';
@@ -152,6 +153,29 @@ export function useConversation(): UseConversationResult {
       // Functional update + the load-time copy guarantee no duplication here.
       setMessages((prev) => [...prev, userMessage]);
       await ContextEngine.observe({ input, intent });
+
+      const relationshipResult = await RelationshipService.handleConversation(input);
+      if (relationshipResult) {
+        setState('thinking');
+        try {
+          const replyText = PersonalityService.warmShortReply(relationshipResult.reply);
+          const assistantMessage = await ConversationRepository.addMessage({
+            conversationId: currentConversation?.id || '',
+            role: 'assistant',
+            content: replyText,
+          });
+          setMessages((prev) => [...prev, assistantMessage]);
+          setLastResponse(replyText);
+          await ContextEngine.rememberAssistantResponse(replyText);
+          await TTSService.speak(replyText);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Relationship memory failed');
+        } finally {
+          setState('idle');
+        }
+        return;
+      }
+
       const decision = await DecisionEngine.decide({ input, intent });
 
       if (decision.action === 'relationship_response' && intent?.intent === 'social_greeting') {
@@ -163,6 +187,13 @@ export function useConversation(): UseConversationResult {
             gender: intent.entities?.gender,
             rawText: input,
           });
+
+          if (intent.entities?.name) {
+            await RelationshipService.upsertPerson({
+              name: intent.entities.name,
+              relationship: intent.entities.relationship,
+            });
+          }
 
           const assistantMessage = await ConversationRepository.addMessage({
             conversationId: currentConversation?.id || '',

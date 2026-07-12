@@ -5,7 +5,9 @@ import Animated, {
   interpolate,
   useAnimatedStyle,
   useSharedValue,
+  withDelay,
   withRepeat,
+  withSequence,
   withTiming,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -21,6 +23,20 @@ const PARTICLES = [
   { x: 0.58, y: 0.84, s: 2, d: 180 },
   { x: 0.10, y: 0.56, s: 2, d: 300 },
 ];
+
+export type AvatarState =
+  | 'idle'
+  | 'listening'
+  | 'thinking'
+  | 'speaking'
+  | 'happy'
+  | 'excited'
+  | 'proud'
+  | 'curious'
+  | 'sleepy'
+  | 'focused'
+  | 'confused'
+  | 'offline';
 
 const EMOTION_GLOW: Record<EmotionState, string> = {
   focused: 'rgba(61,169,255,0.26)',
@@ -80,7 +96,29 @@ function lifeBoost(action?: LifeActionType): number {
   return 0;
 }
 
-export function PresenceField({
+function resolveAvatarState(state: OrbState, emotion: EmotionState, lifeAction?: LifeActionType): AvatarState {
+  if (state === 'offline' || state === 'error') return state === 'error' ? 'confused' : 'offline';
+  if (state === 'listening') return 'listening';
+  if (state === 'thinking' || state === 'tool_execution') return 'thinking';
+  if (state === 'speaking') return 'speaking';
+  if (lifeAction === 'congratulate') return 'proud';
+  if (emotion === 'excited') return 'excited';
+  if (emotion === 'curious') return 'curious';
+  if (emotion === 'focused') return 'focused';
+  if (emotion === 'confused' || emotion === 'frustrated') return 'confused';
+  if (emotion === 'tired') return 'sleepy';
+  if (emotion === 'relaxed') return 'happy';
+  return 'idle';
+}
+
+function avatarIntensity(avatar: AvatarState): number {
+  if (avatar === 'excited' || avatar === 'proud') return 0.22;
+  if (avatar === 'happy' || avatar === 'curious') return 0.12;
+  if (avatar === 'sleepy' || avatar === 'offline') return -0.12;
+  return 0;
+}
+
+export function LivingAvatar({
   children,
   state,
   emotion = 'neutral',
@@ -93,20 +131,59 @@ export function PresenceField({
   lifeAction?: LifeActionType;
   size: number;
 }) {
+  const avatarState = useMemo(() => resolveAvatarState(state, emotion, lifeAction), [emotion, lifeAction, state]);
+  return (
+    <PresenceField state={state} emotion={emotion} lifeAction={lifeAction} size={size} avatarState={avatarState}>
+      {children}
+    </PresenceField>
+  );
+}
+
+export function PresenceField({
+  children,
+  state,
+  emotion = 'neutral',
+  lifeAction,
+  size,
+  avatarState,
+}: {
+  children: ReactNode;
+  state: OrbState;
+  emotion?: EmotionState;
+  lifeAction?: LifeActionType;
+  size: number;
+  avatarState?: AvatarState;
+}) {
   const reducedMotion = useReducedMotionPreference();
+  const avatar = avatarState ?? resolveAvatarState(state, emotion, lifeAction);
   const pulse = useSharedValue(0);
   const glance = useSharedValue(0);
   const wave = useSharedValue(0);
-  const intensity = Math.min(1, PHASE_INTENSITY[state] + lifeBoost(lifeAction));
+  const blink = useSharedValue(0);
+  const tilt = useSharedValue(0);
+  const intensity = Math.max(0.08, Math.min(1, PHASE_INTENSITY[state] + lifeBoost(lifeAction) + avatarIntensity(avatar)));
   const field = size + 86;
   const glowColor = EMOTION_GLOW[emotion] ?? EMOTION_GLOW.neutral;
 
   useEffect(() => {
     const speed = reducedMotion ? PHASE_SPEED[state] * 1.8 : PHASE_SPEED[state];
     pulse.value = withRepeat(withTiming(1, { duration: speed, easing: Easing.inOut(Easing.ease) }), -1, true);
-    glance.value = withRepeat(withTiming(1, { duration: reducedMotion ? 18000 : 9200, easing: Easing.inOut(Easing.ease) }), -1, true);
+    glance.value = withRepeat(withTiming(1, { duration: avatar === 'focused' ? 14000 : reducedMotion ? 18000 : 9200, easing: Easing.inOut(Easing.ease) }), -1, true);
     wave.value = withRepeat(withTiming(1, { duration: state === 'thinking' ? 2200 : 3600, easing: Easing.inOut(Easing.ease) }), -1, false);
-  }, [glance, pulse, reducedMotion, state, wave]);
+    blink.value = reducedMotion
+      ? 0
+      : withRepeat(
+        withSequence(
+          withDelay(5200, withTiming(1, { duration: 90 })),
+          withTiming(0, { duration: 130 }),
+          withDelay(1800, withTiming(1, { duration: 80 })),
+          withTiming(0, { duration: 120 })
+        ),
+        -1,
+        false
+      );
+    tilt.value = withRepeat(withTiming(1, { duration: avatar === 'confused' ? 3600 : 7200, easing: Easing.inOut(Easing.ease) }), -1, true);
+  }, [avatar, blink, glance, pulse, reducedMotion, state, tilt, wave]);
 
   const glowStyle = useAnimatedStyle(() => ({
     opacity: reducedMotion ? intensity * 0.38 : interpolate(pulse.value, [0, 1], [intensity * 0.34, intensity * 0.72]),
@@ -121,9 +198,19 @@ export function PresenceField({
   const eyeStyle = useAnimatedStyle(() => ({
     opacity: state === 'offline' ? 0.16 : 0.42 + intensity * 0.3,
     transform: [
-      { translateX: reducedMotion ? 0 : interpolate(glance.value, [0, 0.5, 1], [-4, 5, -2]) },
-      { translateY: state === 'listening' ? -2 : reducedMotion ? 0 : interpolate(glance.value, [0, 1], [1, -1]) },
-      { scaleY: state === 'speaking' ? interpolate(pulse.value, [0, 1], [0.55, 1]) : 1 },
+      { translateX: reducedMotion || avatar === 'focused' ? 0 : interpolate(glance.value, [0, 0.5, 1], [-4, 5, -2]) },
+      { translateY: avatar === 'thinking' || avatar === 'curious' ? -5 : avatar === 'listening' ? -2 : avatar === 'sleepy' ? 4 : reducedMotion ? 0 : interpolate(glance.value, [0, 1], [1, -1]) },
+      { rotateZ: avatar === 'confused' ? `${interpolate(tilt.value, [0, 1], [-5, 5])}deg` : '0deg' },
+      { scaleX: avatar === 'listening' ? 1.12 : avatar === 'sleepy' ? 0.92 : 1 },
+      { scaleY: interpolate(blink.value, [0, 1], [avatar === 'sleepy' ? 0.58 : avatar === 'happy' || avatar === 'proud' ? 0.72 : state === 'speaking' ? 0.78 : 1, 0.12]) },
+    ],
+  }));
+
+  const avatarShellStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: reducedMotion ? 0 : interpolate(pulse.value, [0, 1], [avatar === 'sleepy' ? 1 : -1, avatar === 'excited' ? -5 : 2]) },
+      { rotateZ: reducedMotion ? '0deg' : `${interpolate(tilt.value, [0, 1], [avatar === 'confused' ? -1.8 : -0.8, avatar === 'confused' ? 2.2 : 0.8])}deg` },
+      { scale: reducedMotion ? 1 : interpolate(pulse.value, [0, 1], [avatar === 'proud' ? 1.02 : 0.99, avatar === 'excited' ? 1.045 : avatar === 'speaking' ? 1.025 : 1.01]) },
     ],
   }));
 
@@ -132,14 +219,24 @@ export function PresenceField({
       <Animated.View style={[styles.presenceGlow, { width: field, height: field, borderRadius: field / 2, backgroundColor: glowColor }, glowStyle]} />
       <Animated.View style={[styles.ripple, { width: size * 1.08, height: size * 1.08, borderRadius: size * 0.54, borderColor: glowColor }, rippleStyle]} />
       {!reducedMotion ? <Particles field={field} color={glowColor} /> : null}
-      {children}
-      <Animated.View style={[styles.eyePair, { top: field / 2 - size * 0.17 }, eyeStyle]}>
-        <View style={[styles.eye, { backgroundColor: state === 'error' ? 'rgba(255,180,190,0.88)' : 'rgba(236,251,255,0.82)' }]} />
-        <View style={[styles.eye, { backgroundColor: state === 'error' ? 'rgba(255,180,190,0.88)' : 'rgba(236,251,255,0.82)' }]} />
+      <Animated.View style={avatarShellStyle}>
+        {children}
       </Animated.View>
-      {state === 'speaking' ? <MouthLight color={glowColor} /> : null}
+      <Animated.View style={[styles.eyePair, { top: field / 2 - size * 0.17 }, eyeStyle]}>
+        <View style={[styles.eye, expressiveEyeStyle(avatar, state)]} />
+        <View style={[styles.eye, expressiveEyeStyle(avatar, state), avatar === 'confused' && styles.eyeRaised]} />
+      </Animated.View>
+      {state === 'speaking' || avatar === 'happy' || avatar === 'proud' ? <MouthLight color={glowColor} avatar={avatar} /> : null}
     </View>
   );
+}
+
+function expressiveEyeStyle(avatar: AvatarState, state: OrbState) {
+  return {
+    width: avatar === 'listening' ? 11 : avatar === 'focused' ? 8 : 9,
+    height: avatar === 'sleepy' ? 3 : avatar === 'happy' || avatar === 'proud' ? 3 : 4,
+    backgroundColor: state === 'error' || avatar === 'confused' ? 'rgba(255,200,214,0.88)' : 'rgba(236,251,255,0.84)',
+  };
 }
 
 export function AmbientPresence({ emotion = 'neutral', lifeAction }: { emotion?: EmotionState; lifeAction?: LifeActionType }) {
@@ -239,16 +336,19 @@ function AmbientParticles({ color }: { color: string }) {
   );
 }
 
-function MouthLight({ color }: { color: string }) {
+function MouthLight({ color, avatar }: { color: string; avatar: AvatarState }) {
   const talk = useSharedValue(0);
   useEffect(() => {
-    talk.value = withRepeat(withTiming(1, { duration: 540, easing: Easing.inOut(Easing.ease) }), -1, true);
-  }, [talk]);
+    talk.value = withRepeat(withTiming(1, { duration: avatar === 'speaking' ? 540 : 1600, easing: Easing.inOut(Easing.ease) }), -1, true);
+  }, [avatar, talk]);
   const style = useAnimatedStyle(() => ({
-    opacity: interpolate(talk.value, [0, 1], [0.18, 0.64]),
-    transform: [{ scaleX: interpolate(talk.value, [0, 1], [0.62, 1.08]) }],
+    opacity: interpolate(talk.value, [0, 1], [avatar === 'speaking' ? 0.18 : 0.24, avatar === 'speaking' ? 0.64 : 0.48]),
+    transform: [
+      { scaleX: interpolate(talk.value, [0, 1], [avatar === 'speaking' ? 0.62 : 0.86, avatar === 'speaking' ? 1.08 : 1.18]) },
+      { translateY: avatar === 'proud' || avatar === 'happy' ? -2 : 0 },
+    ],
   }));
-  return <Animated.View style={[styles.mouth, { backgroundColor: color }, style]} />;
+  return <Animated.View style={[styles.mouth, avatar !== 'speaking' && styles.smileMouth, { backgroundColor: color }, style]} />;
 }
 
 const styles = StyleSheet.create({
@@ -266,6 +366,8 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 0 },
   },
+  eyeRaised: { marginTop: -2 },
   mouth: { position: 'absolute', bottom: '34%', width: 32, height: 4, borderRadius: 4 },
+  smileMouth: { width: 42, height: 3, borderRadius: 8 },
   ambientParticle: { position: 'absolute', opacity: 0.28 },
 });

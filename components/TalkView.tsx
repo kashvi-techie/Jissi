@@ -12,7 +12,7 @@ import { AIMessage } from '@/services/ai';
 import type { EmotionState } from '@/services/emotion';
 import type { LifeActionType } from '@/services/life';
 import { AppText, GlassSurface, PressableScale, VoiceButton, VoiceButtonState } from '@/components/ui';
-import { AmbientPresence, PresenceField } from '@/components/presence/PresenceEngine';
+import { AmbientPresence, LivingAvatar } from '@/components/presence/PresenceEngine';
 import { useTheme } from '@/theme';
 import { Fonts } from '@/theme/typography';
 import { Radii, Spacing } from '@/theme/tokens';
@@ -132,10 +132,10 @@ export const TalkView = memo(function TalkView({
 
       <View style={styles.body}>
         <Animated.View style={[styles.orbStage, orbScale]} accessibilityLabel={`Assistant state: ${status}`}>
-          <PresenceField state={orbState} emotion={emotionState} lifeAction={lifeAction} size={orbSize}>
+          <LivingAvatar state={orbState} emotion={emotionState} lifeAction={lifeAction} size={orbSize}>
             <VoiceWave active={isActive} size={orbSize * 1.02} intensity={waveIntensity} />
             <OrbEngine state={orbState} size={orbSize} />
-          </PresenceField>
+          </LivingAvatar>
         </Animated.View>
         <AppText variant="caption" color="accent" style={styles.status}>
           {status}

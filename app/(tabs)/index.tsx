@@ -46,7 +46,7 @@ import { VoiceOverlay } from '@/components/VoiceOverlay';
 import { AppText, GlassSurface, PressableScale, Screen, VoiceButton, VoiceButtonState } from '@/components/ui';
 import { ConversationTimeline } from '@/components/ConversationTimeline';
 import { AchievementToast, DailyQuoteCard } from '@/components/delight/DelightSurfaces';
-import { AmbientPresence, PresenceField } from '@/components/presence/PresenceEngine';
+import { AmbientPresence, LivingAvatar } from '@/components/presence/PresenceEngine';
 import { useTheme } from '@/theme';
 import { Fonts } from '@/theme/typography';
 import { Radii, Spacing } from '@/theme/tokens';
@@ -698,10 +698,10 @@ function DesktopExperience({
         </Animated.View>
 
         <Animated.View entering={FadeInUp.delay(120).duration(480)} style={styles.desktopOrbStage}>
-          <PresenceField state={orbState} emotion={emotionState} lifeAction={lifeAction} size={320}>
+          <LivingAvatar state={orbState} emotion={emotionState} lifeAction={lifeAction} size={320}>
             <VoiceWave active={isActive} size={330} intensity={phase === 'speaking' ? 1.25 : phase === 'listening' ? 0.95 : 0.72} />
             <OrbEngine state={orbState} size={320} />
-          </PresenceField>
+          </LivingAvatar>
         </Animated.View>
 
         <AppText variant="caption" color="accent" style={styles.desktopStatus}>

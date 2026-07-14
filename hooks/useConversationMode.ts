@@ -6,6 +6,7 @@ import { SpeechState } from '@/services/speech/types';
 import { AIMessage } from '@/services/ai';
 import { HapticsService } from '@/services/haptics';
 import { BehaviorEngine } from '@/services/behavior';
+import { TTSService, VoiceDiagnostics } from '@/services/voice';
 
 /**
  * Continuous Conversation Mode.
@@ -20,7 +21,7 @@ import { BehaviorEngine } from '@/services/behavior';
  * existing hooks/services separation is preserved — nothing below this layer
  * changed.
  */
-export type ConversationMode = 'idle' | 'listening' | 'processing' | 'speaking' | 'waiting';
+export type ConversationMode = 'idle' | 'listening' | 'processing' | 'speaking' | 'interrupted' | 'recovering' | 'offline' | 'waiting';
 
 /** Cooldown after TTS before re-opening the mic. Lets the audio output settle so
  *  the tail of the spoken reply is never captured as user speech. */
@@ -37,6 +38,8 @@ function computeMode(
   assistantState: AssistantState,
   isListening: boolean
 ): ConversationMode {
+  if (!active && !isListening) return 'idle';
+  if (!isListening && speechState === 'error') return 'recovering';
   if (!active) return 'idle';
   if (assistantState === 'speaking') return 'speaking';
   if (assistantState === 'thinking' || speechState === 'processing') return 'processing';
@@ -49,6 +52,9 @@ export interface UseConversationModeResult {
   isActive: boolean;
   isListening: boolean;
   isSupported: boolean;
+  voiceConfidence: number;
+  lastHeardAt: string | null;
+  conversationDurationMs: number;
   speechState: SpeechState;
   assistantState: AssistantState;
   transcript: string;
@@ -90,8 +96,11 @@ export function useConversationMode(): UseConversationModeResult {
   const error = speechError || conversationError;
 
   const [isActive, setIsActive] = useState(false);
+  const [lastHeardAt, setLastHeardAt] = useState<string | null>(null);
+  const [conversationDurationMs, setConversationDurationMs] = useState(0);
   const isActiveRef = useRef(false);
   const prevTranscriptRef = useRef('');
+  const prevHeardTextRef = useRef('');
   const prevAssistantRef = useRef<AssistantState>(assistantState);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorCountRef = useRef(0);
@@ -114,6 +123,10 @@ export function useConversationMode(): UseConversationModeResult {
     console.log('[STEP 2] useConversationMode entered');
     console.log('[STT][mode:beginListening] inFlight=', micStartInFlightRef.current, 'appState=', appStateRef.current);
     if (micStartInFlightRef.current || appStateRef.current !== 'active') return;
+    if (assistantState === 'speaking') {
+      VoiceDiagnostics.update({ runtimeState: 'interrupted', audioFocus: 'interrupted', conversationState: 'interrupted' });
+      await stopSpeaking();
+    }
     micStartInFlightRef.current = true;
     prevTranscriptRef.current = '';
     clearTranscript();
@@ -128,7 +141,7 @@ export function useConversationMode(): UseConversationModeResult {
     } finally {
       micStartInFlightRef.current = false;
     }
-  }, [clearTranscript, startListening]);
+  }, [assistantState, clearTranscript, startListening, stopSpeaking]);
 
   const stopConversation = useCallback(() => {
     const startedAt = sessionStartRef.current;
@@ -141,6 +154,7 @@ export function useConversationMode(): UseConversationModeResult {
       });
     }
     sessionStartRef.current = null;
+    setConversationDurationMs(0);
     isActiveRef.current = false;
     setIsActive(false);
     pausedByBackgroundRef.current = false;
@@ -149,6 +163,7 @@ export function useConversationMode(): UseConversationModeResult {
     void stopListening();
     void stopSpeaking();
     HapticsService.play('listen_stop');
+    VoiceDiagnostics.update({ continuousConversation: false, conversationState: 'idle', runtimeState: 'idle' });
   }, [clearTimer, stopListening, stopSpeaking]);
 
   const pauseForBackground = useCallback(() => {
@@ -160,6 +175,7 @@ export function useConversationMode(): UseConversationModeResult {
     micStartInFlightRef.current = false;
     void stopListening();
     void stopSpeaking();
+    VoiceDiagnostics.update({ conversationState: 'paused_background', audioFocus: 'interrupted' });
   }, [clearTimer, stopListening, stopSpeaking]);
 
   const startConversation = useCallback(() => {
@@ -168,21 +184,30 @@ export function useConversationMode(): UseConversationModeResult {
     if (!isSupported || isActiveRef.current) return;
     isActiveRef.current = true;
     sessionStartRef.current = Date.now();
+    setConversationDurationMs(0);
     BehaviorEngine.recordEvent({
       category: 'conversation',
       intent: 'conversation_started',
       confidence: 0.55,
     });
     setIsActive(true);
+    VoiceDiagnostics.update({ continuousConversation: true, conversationState: 'listening', bargeInAvailable: true });
     errorCountRef.current = 0;
     void beginListening();
   }, [isSupported, beginListening]);
 
   const toggle = useCallback(() => {
     console.log('[STEP 2] useConversationMode entered');
+    if (assistantState === 'speaking') {
+      isActiveRef.current = true;
+      setIsActive(true);
+      clearTimer();
+      void beginListening();
+      return;
+    }
     if (isActiveRef.current) stopConversation();
     else startConversation();
-  }, [startConversation, stopConversation]);
+  }, [assistantState, beginListening, clearTimer, startConversation, stopConversation]);
 
   /** Start a session seeded with a text prompt (suggestion card). The continuous
    *  loop then auto-reopens the mic after the assistant replies, so the topic
@@ -193,6 +218,7 @@ export function useConversationMode(): UseConversationModeResult {
       if (!t) return;
       isActiveRef.current = true;
       sessionStartRef.current = Date.now();
+      setConversationDurationMs(0);
       BehaviorEngine.recordEvent({
         category: 'conversation',
         intent: 'conversation_started',
@@ -201,6 +227,7 @@ export function useConversationMode(): UseConversationModeResult {
       });
       BehaviorEngine.recordIntent('prompt_card', { text: t });
       setIsActive(true);
+      VoiceDiagnostics.update({ continuousConversation: true, conversationState: 'processing', bargeInAvailable: true });
       errorCountRef.current = 0;
       prevTranscriptRef.current = '';
       clearTimer();
@@ -256,6 +283,29 @@ export function useConversationMode(): UseConversationModeResult {
     }
   }, [assistantState, scheduleRestart]);
 
+  useEffect(() => {
+    if (!isActive) {
+      setConversationDurationMs(0);
+      return;
+    }
+    const updateDuration = () => {
+      if (sessionStartRef.current) {
+        setConversationDurationMs(Date.now() - sessionStartRef.current);
+      }
+    };
+    updateDuration();
+    const timer = setInterval(updateDuration, 1000);
+    return () => clearInterval(timer);
+  }, [isActive]);
+
+  useEffect(() => {
+    if (!isActiveRef.current) return;
+    const heardText = (interimTranscript || transcript).trim();
+    if (!heardText || heardText === prevHeardTextRef.current) return;
+    prevHeardTextRef.current = heardText;
+    setLastHeardAt(new Date().toISOString());
+  }, [interimTranscript, transcript]);
+
   // ── Recovery: recoverable STT error → retry; fatal → stop.
   useEffect(() => {
     if (!isActiveRef.current) return;
@@ -281,6 +331,7 @@ export function useConversationMode(): UseConversationModeResult {
       ? RECOVERY_DELAY_MS
       : Math.min(MAX_RECOVERY_DELAY_MS, RECOVERY_DELAY_MS * Math.max(1, errorCountRef.current));
     scheduleRestart(delay);
+    VoiceDiagnostics.incrementRecovery(speechError);
   }, [speechState, speechError, scheduleRestart, stopConversation]);
 
   // ── AppState: leaving the foreground safely halts the loop.
@@ -310,12 +361,30 @@ export function useConversationMode(): UseConversationModeResult {
   }, [clearTimer]);
 
   const mode = computeMode(isActive, speechState, assistantState, isListening);
+  const liveSpeechText = (interimTranscript || transcript).trim();
+  const voiceConfidence = !isSupported
+    ? 0
+    : mode === 'listening' && liveSpeechText
+      ? Math.min(0.98, 0.72 + liveSpeechText.length / 180)
+      : mode === 'listening'
+        ? 0.56
+        : mode === 'speaking'
+          ? 0.88
+          : mode === 'processing'
+            ? 0.74
+            : 0;
+  useEffect(() => {
+    VoiceDiagnostics.setRuntimeFromStates(speechState, TTSService.getState(), mode, isSupported);
+  }, [speechState, assistantState, mode, isSupported]);
 
   return {
     mode,
     isActive,
     isListening,
     isSupported,
+    voiceConfidence,
+    lastHeardAt,
+    conversationDurationMs,
     speechState,
     assistantState,
     transcript,

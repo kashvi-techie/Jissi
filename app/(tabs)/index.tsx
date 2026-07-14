@@ -6,6 +6,7 @@ import {
   BookOpen,
   Brain,
   CalendarCheck2,
+  GitBranch,
   Home,
   MessageCircle,
   MessageSquare,
@@ -22,7 +23,7 @@ import type { LucideIcon } from 'lucide-react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { SpeechState } from '@/services/speech/types';
 import { TTSService } from '@/services/voice';
-import { ProactiveExperience, ProactiveSuggestion } from '@/services/proactive';
+import { ProactiveEngine, ProactiveExperience, ProactiveSuggestion } from '@/services/proactive';
 import { OnboardingService } from '@/services/onboarding';
 import { LifeDecision, LifeEngine } from '@/services/life';
 import type { LifeActionType } from '@/services/life';
@@ -33,6 +34,7 @@ import { ContextEngine } from '@/services/context';
 import { BehaviorEngine } from '@/services/behavior';
 import { TimelineService } from '@/services/timeline';
 import { DelightService, DelightAchievement, DelightSnapshot } from '@/services/delight';
+import { DailyBriefEngine, DailyBrief } from '@/services/daily';
 import { RelationshipService, RelationshipProfile } from '@/services/relationships';
 import { ExplainabilityService } from '@/services/explainability';
 import { AssistantState } from '@/hooks/useConversation';
@@ -41,6 +43,7 @@ import { OrbState } from '@/components/orb/PlasmaOrb';
 import { OrbEngine } from '@/components/orb/OrbEngine';
 import { VoiceWave } from '@/components/VoiceWave';
 import { TalkView } from '@/components/TalkView';
+import { DailyBriefCard } from '@/components/daily/DailyBriefCard';
 import { VoiceOverlay } from '@/components/VoiceOverlay';
 import { AppText, GlassSurface, PressableScale, Screen, VoiceButton, VoiceButtonState } from '@/components/ui';
 import { ConversationTimeline } from '@/components/ConversationTimeline';
@@ -51,6 +54,13 @@ import { Fonts } from '@/theme/typography';
 import { Radii, Spacing } from '@/theme/tokens';
 
 const WIDE_BREAKPOINT = 900;
+const thinkingPhrases = [
+  'Thinking...',
+  'Let me figure that out...',
+  'One second...',
+  'Looking through what I know...',
+  'Connecting the pieces...',
+];
 
 type Phase = 'idle' | 'listening' | 'processing' | 'thinking' | 'speaking' | 'tool_execution' | 'offline' | 'error';
 type HomeSuggestion =
@@ -223,6 +233,10 @@ export default function HomeScreen() {
     messages,
     error,
     isSupported,
+    mode,
+    voiceConfidence,
+    lastHeardAt,
+    conversationDurationMs,
     stop,
     toggle,
     sendPrompt,
@@ -250,6 +264,7 @@ export default function HomeScreen() {
     cards: [],
   });
   const [delight, setDelight] = useState<DelightSnapshot | null>(null);
+  const [dailyBrief, setDailyBrief] = useState<DailyBrief | null>(null);
   const [celebration, setCelebration] = useState<DelightAchievement | null>(null);
   const [presenceEmotion, setPresenceEmotion] = useState<EmotionState>('neutral');
 
@@ -279,6 +294,18 @@ export default function HomeScreen() {
       cancelled = true;
     };
   }, [router]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadDailyBrief = async () => {
+      const brief = await DailyBriefEngine.getBriefToShow().catch(() => null);
+      if (!cancelled) setDailyBrief(brief);
+    };
+    loadDailyBrief();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -349,8 +376,8 @@ export default function HomeScreen() {
         route: '/timeline',
       };
       const timelineCard: DashboardCard = {
-        id: 'timeline',
-        label: 'Timeline Preview',
+        id: 'recent-memory',
+        label: 'Recent Memory',
         title: latestTimeline ? `${relativeDay(latestTimeline.timestamp)}: ${latestTimeline.title}` : 'Your story is waiting to be written',
         body: latestTimeline?.description ?? 'Milestones, habits and important memories will appear here automatically.',
         icon: BookOpen,
@@ -381,10 +408,7 @@ export default function HomeScreen() {
       const cards = [
         todayFocus,
         continueJourney,
-        relationshipCard,
-        achievementCard,
         timelineCard,
-        moodCard,
         thoughtCard,
       ];
       setDelight(delightSnapshot);
@@ -445,7 +469,7 @@ export default function HomeScreen() {
         }
         return;
       }
-      const suggestions = await ProactiveExperience.getSuggestions(interruptionState);
+      const suggestions = await ProactiveEngine.getLegacySuggestions(interruptionState);
       const proactive = suggestions[0];
       if (!cancelled) {
         setSuggestion(proactive ? {
@@ -470,6 +494,7 @@ export default function HomeScreen() {
       await LifeEngine.markShown(suggestion.decision);
     } else {
       await ProactiveExperience.recordFeedback(suggestion.suggestion, 'accepted');
+      await ProactiveEngine.recordLegacy(suggestion.suggestion, 'accepted');
     }
     setSuggestion(null);
     if (suggestion.action.type === 'prompt') {
@@ -485,6 +510,16 @@ export default function HomeScreen() {
       await LifeEngine.markShown(suggestion.decision);
     } else {
       await ProactiveExperience.recordFeedback(suggestion.suggestion, 'ignored');
+      await ProactiveEngine.recordLegacy(suggestion.suggestion, 'dismissed');
+    }
+    setSuggestion(null);
+  };
+  const remindLaterSuggestion = async () => {
+    if (!suggestion) return;
+    if (suggestion.kind === 'life') {
+      await LifeEngine.markShown(suggestion.decision);
+    } else {
+      await ProactiveEngine.recordLegacy(suggestion.suggestion, 'remind_later');
     }
     setSuggestion(null);
   };
@@ -512,12 +547,18 @@ export default function HomeScreen() {
           status={statusShort(phase, isSupported)}
           transcript={voiceTranscript}
           messages={messages}
+          currentMode={mode}
+          voiceConfidence={voiceConfidence}
+          lastHeardAt={lastHeardAt}
+          conversationDurationMs={conversationDurationMs}
+          dailyBrief={dailyBrief}
           suggestion={suggestion}
           delight={delight}
           emotionState={presenceEmotion}
           lifeAction={lifeAction}
           onAcceptSuggestion={acceptSuggestion}
           onDismissSuggestion={dismissSuggestion}
+          onRemindLaterSuggestion={remindLaterSuggestion}
           onMic={() => {
             TTSService.unlockWeb();
             if (isSupported) toggle();
@@ -528,6 +569,7 @@ export default function HomeScreen() {
             if (isSupported) toggle();
           }}
           onPrompt={openTopic}
+          onDailyBriefAction={openTopic}
           onNavigate={(route) => router.push(route as never)}
         />
       ) : (
@@ -537,6 +579,10 @@ export default function HomeScreen() {
           status={statusShort(phase, isSupported)}
           transcript={voiceTranscript}
           messages={messages}
+          currentMode={mode}
+          voiceConfidence={voiceConfidence}
+          lastHeardAt={lastHeardAt}
+          conversationDurationMs={conversationDurationMs}
           onMic={() => {
             TTSService.unlockWeb();
             if (isSupported) toggle();
@@ -551,10 +597,13 @@ export default function HomeScreen() {
           moodLabel={dashboard.moodLabel}
           focusLabel={dashboard.focusLabel}
           dashboardCards={dashboard.cards}
+          dailyBrief={dailyBrief}
+          onDailyBriefAction={openTopic}
           emotionState={presenceEmotion}
           lifeAction={lifeAction}
           onPlanner={() => router.push('/planner-debug' as never)}
           onTimeline={() => router.push('/timeline' as never)}
+          onLifeGraph={() => router.push('/(tabs)/life-graph' as never)}
           onMemory={() => router.push('/(tabs)/profile' as never)}
           onRelationships={() => router.push('/relationship-debug' as never)}
           onSettings={() => router.push('/(tabs)/settings' as never)}
@@ -563,7 +612,7 @@ export default function HomeScreen() {
 
       {!isWide && suggestion ? (
         <View style={styles.mobileSuggestion}>
-          <ProactiveCard suggestion={suggestion} onAccept={acceptSuggestion} onDismiss={dismissSuggestion} compact />
+          <ProactiveCard suggestion={suggestion} onAccept={acceptSuggestion} onDismiss={dismissSuggestion} onRemindLater={remindLaterSuggestion} compact />
         </View>
       ) : null}
 
@@ -575,6 +624,10 @@ export default function HomeScreen() {
           status={statusShort(phase, isSupported)}
           transcript={voiceTranscript}
           messages={messages}
+          currentMode={mode}
+          voiceConfidence={voiceConfidence}
+          lastHeardAt={lastHeardAt}
+          conversationDurationMs={conversationDurationMs}
           onMic={() => {
             TTSService.unlockWeb();
             toggle();
@@ -598,15 +651,22 @@ function DesktopExperience({
   status,
   transcript,
   messages,
+  currentMode,
+  voiceConfidence,
+  lastHeardAt,
+  conversationDurationMs,
+  dailyBrief,
   suggestion,
   delight,
   emotionState,
   lifeAction,
   onAcceptSuggestion,
   onDismissSuggestion,
+  onRemindLaterSuggestion,
   onMic,
   onTalk,
   onPrompt,
+  onDailyBriefAction,
   onNavigate,
 }: {
   dashboard: MobileDashboard;
@@ -616,38 +676,71 @@ function DesktopExperience({
   status: string;
   transcript: string;
   messages: ReturnType<typeof useConversationMode>['messages'];
+  currentMode: string;
+  voiceConfidence: number;
+  lastHeardAt: string | null;
+  conversationDurationMs: number;
+  dailyBrief: DailyBrief | null;
   suggestion: HomeSuggestion | null;
   delight: DelightSnapshot | null;
   emotionState: EmotionState;
   lifeAction?: LifeActionType;
   onAcceptSuggestion: () => void;
   onDismissSuggestion: () => void;
+  onRemindLaterSuggestion: () => void;
   onMic: () => void;
   onTalk: () => void;
   onPrompt: (text: string) => void;
+  onDailyBriefAction: (text: string) => void;
   onNavigate: (route: string) => void;
 }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
   const [showMoreInsights, setShowMoreInsights] = useState(false);
+  const [phraseIndex, setPhraseIndex] = useState(0);
   const isActive = orbState === 'listening' || orbState === 'speaking' || orbState === 'tool_execution';
-  const isThinking = orbState === 'thinking' || orbState === 'tool_execution';
+  const isThinking = phase === 'thinking' || phase === 'processing' || phase === 'tool_execution';
   const dashboardCards = useMemo(() => dashboard.cards, [dashboard.cards]);
   const findCard = (id: string) => dashboardCards.find((card) => card.id === id);
-  const heroCards = useMemo(() => ['today-focus', 'continue', 'relationship'].map(findCard).filter((card): card is DashboardCard => !!card), [dashboardCards]);
-  const rightCards = useMemo(() => ['thought', 'today-focus', 'mood', 'timeline'].map(findCard).filter((card): card is DashboardCard => !!card), [dashboardCards]);
-  const hiddenCards = useMemo(() => dashboardCards.filter((card) => !rightCards.some((visible) => visible.id === card.id)), [dashboardCards, rightCards]);
+  const focusCard = findCard('today-focus');
+  const continueCard = findCard('continue');
+  const memoryCard = findCard('recent-memory');
+  const thoughtCard = findCard('thought');
+  const rightCards = useMemo(() => [focusCard, continueCard, thoughtCard].filter((card): card is DashboardCard => !!card), [focusCard, continueCard, thoughtCard]);
+  const belowFoldCards = useMemo(() => [continueCard, focusCard, memoryCard].filter((card): card is DashboardCard => !!card), [continueCard, focusCard, memoryCard]);
   const recentAssistant = [...messages].reverse().find((message) => message.role === 'assistant')?.content;
   const navItems: { label: string; icon: LucideIcon; route?: string; onPress?: () => void }[] = [
     { label: 'Home', icon: Home },
-    { label: 'Chat', icon: MessageSquare, onPress: () => onPrompt('Let us talk') },
-    { label: 'Timeline', icon: BookOpen, route: '/timeline' },
     { label: 'Planner', icon: CalendarCheck2, route: '/planner-debug' },
+    { label: 'Timeline', icon: BookOpen, route: '/timeline' },
+    { label: 'Life Graph', icon: GitBranch, route: '/(tabs)/life-graph' },
     { label: 'People', icon: Users, route: '/relationship-debug' },
-    { label: 'Memory', icon: Brain, route: '/(tabs)/profile' },
-    { label: 'Profile', icon: User, route: '/(tabs)/profile' },
     { label: 'Settings', icon: Settings, route: '/(tabs)/settings' },
   ];
+  const quickActions: { label: string; prompt: string; icon: LucideIcon }[] = [
+    { label: 'Continue yesterday', prompt: 'Continue where we stopped yesterday', icon: Repeat },
+    { label: 'Plan my day', prompt: 'Help me plan my day', icon: CalendarCheck2 },
+    { label: 'Talk', prompt: 'Let us talk', icon: MessageSquare },
+    { label: 'Remember something', prompt: 'Remember something important', icon: BookOpen },
+    { label: 'Reflect', prompt: 'Help me reflect on today', icon: Sparkles },
+  ];
+
+  useEffect(() => {
+    if (!isThinking) {
+      setPhraseIndex(0);
+      return;
+    }
+    const timer = setInterval(() => setPhraseIndex((index) => (index + 1) % thinkingPhrases.length), 1600);
+    return () => clearInterval(timer);
+  }, [isThinking]);
+
+  const companionText = isThinking
+    ? thinkingPhrases[phraseIndex]
+    : phase === 'listening'
+      ? transcript || "I'm listening."
+      : phase === 'speaking'
+        ? 'Speaking... tap Talk to interrupt.'
+        : transcript || dashboard.greetingSubtext || dashboard.quickThought;
 
   return (
     <View style={styles.desktopRoot}>
@@ -694,76 +787,102 @@ function DesktopExperience({
         </GlassSurface>
       </PressableScale>
 
-      <View style={styles.desktopCenter}>
-        <Animated.View entering={FadeInUp.delay(40).duration(420)} style={styles.desktopHero}>
-          <AppText style={styles.desktopGreeting} color="primary">
-            {dashboard.greeting}
+      <ScrollView style={styles.desktopCenterScroll} contentContainerStyle={styles.desktopCenterContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.desktopHero}>
+          <Animated.View entering={FadeInUp.delay(40).duration(440)} style={styles.heroCopy}>
+            <AppText style={styles.desktopGreeting} color="primary">
+              {dashboard.greeting.endsWith('.') ? dashboard.greeting : `${dashboard.greeting}.`}
+            </AppText>
+            <AppText style={styles.desktopSubtitle} color="muted">
+              Ready whenever you are.
+            </AppText>
+          </Animated.View>
+
+          <Animated.View entering={FadeInUp.delay(120).duration(520)} style={styles.desktopOrbStage}>
+            <LivingAvatar state={orbState} emotion={emotionState} lifeAction={lifeAction} size={292}>
+              <VoiceWave active={isActive} size={304} intensity={phase === 'speaking' ? 1.12 : phase === 'listening' ? 0.88 : 0.56} />
+              <OrbEngine state={orbState} size={292} />
+            </LivingAvatar>
+          </Animated.View>
+
+          <AppText style={styles.desktopCompanion} color="muted">
+            {companionText}
           </AppText>
-        </Animated.View>
+          {isThinking ? <TypingIndicator /> : null}
+          <DesktopPresenceMeta
+            mode={currentMode}
+            confidence={voiceConfidence}
+            lastHeardAt={lastHeardAt}
+            durationMs={conversationDurationMs}
+          />
 
-        <Animated.View entering={FadeInUp.delay(120).duration(480)} style={styles.desktopOrbStage}>
-          <LivingAvatar state={orbState} emotion={emotionState} lifeAction={lifeAction} size={286}>
-            <VoiceWave active={isActive} size={298} intensity={phase === 'speaking' ? 1.18 : phase === 'listening' ? 0.9 : 0.66} />
-            <OrbEngine state={orbState} size={286} />
-          </LivingAvatar>
-        </Animated.View>
-
-        <AppText style={styles.desktopCompanion} color="muted">
-          {transcript || dashboard.greetingSubtext || dashboard.quickThought}
-        </AppText>
-
-        <PressableScale onPress={onTalk} accessibilityRole="button" accessibilityLabel="Talk to JISSI" style={styles.primaryTalkWrap}>
-          <GlassSurface intensity={44} radius={Radii.pill} strong style={styles.primaryTalk}>
-            <VoiceButton state={voiceState} onPress={onMic} size={62} />
-            <View style={styles.primaryTalkCopy}>
-              <AppText variant="bodyStrong" color="primary">
-                Let's Talk
+          <View style={styles.heroCtas}>
+            <PressableScale onPress={onTalk} accessibilityRole="button" accessibilityLabel="Tap to Talk" style={styles.primaryTalkWrap}>
+              <GlassSurface intensity={44} radius={Radii.pill} strong style={styles.primaryTalk}>
+                <VoiceButton state={voiceState} onPress={onMic} size={62} />
+                <View style={styles.primaryTalkCopy}>
+                  <AppText variant="bodyStrong" color="primary">
+                    Tap to Talk
+                  </AppText>
+                  <AppText variant="caption" color="muted">
+                    {status}
+                  </AppText>
+                </View>
+              </GlassSurface>
+            </PressableScale>
+            <PressableScale onPress={() => onPrompt('I want to type instead')} accessibilityRole="button" accessibilityLabel="Type instead" style={styles.secondaryCta}>
+              <AppText variant="bodyStrong" color="secondary">
+                Type instead
               </AppText>
-              <AppText variant="caption" color="muted">
-                {status}
-              </AppText>
-            </View>
-          </GlassSurface>
-        </PressableScale>
+            </PressableScale>
+          </View>
 
-        <View style={styles.heroCardGrid}>
-          {heroCards.map((card, index) => (
-            <View key={card.id} style={styles.heroCardWrap}>
+          <View style={styles.quickActionRow}>
+            {quickActions.map((action, index) => (
+              <DesktopQuickAction key={action.label} card={action} delay={220 + index * 35} onPress={() => onPrompt(action.prompt)} />
+            ))}
+          </View>
+
+          {dailyBrief ? <DailyBriefCard brief={dailyBrief} onAction={onDailyBriefAction} /> : null}
+        </View>
+
+        <View style={styles.belowFold}>
+          {belowFoldCards.map((card, index) => (
+            <View key={card.id} style={styles.belowCardWrap}>
               <InsightCard
                 icon={card.icon}
                 label={card.label}
                 title={card.title}
                 value={card.body}
-                delay={180 + index * 60}
+                delay={80 + index * 60}
                 onPress={card.route ? () => onNavigate(card.route as string) : undefined}
               />
             </View>
           ))}
-          <View style={styles.heroCardWrap}>
+          <View style={styles.belowCardWrap}>
             <InsightCard
               icon={MessageSquare}
-              label="Recent Conversations"
+              label="Conversation"
               title={recentAssistant ? 'Latest reply' : 'No conversation yet'}
               value={recentAssistant ?? 'Start with one thought and JISSI will keep the thread warm.'}
-              delay={360}
+              delay={280}
               onPress={() => onNavigate('/(tabs)/history')}
             />
           </View>
         </View>
-      </View>
+      </ScrollView>
 
       <View style={styles.rightPanel}>
         <GlassSurface intensity={32} radius={Radii.xxl} style={styles.rightPanelSurface}>
           <View style={styles.rightPanelHeader}>
             <AppText variant="title" color="primary">
-              Today
+              Companion
             </AppText>
             <AppText variant="caption" color="muted">
-              Composed from your local engines
+              Quiet context, only what matters.
             </AppText>
           </View>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.rightPanelScroll}>
-            {delight?.quote ? <DailyQuoteCard quote={delight.quote} /> : null}
             {rightCards.map((card, index) => (
               <InsightCard
                 key={card.id}
@@ -775,16 +894,20 @@ function DesktopExperience({
                 onPress={card.route ? () => onNavigate(card.route as string) : undefined}
               />
             ))}
-            {hiddenCards.length ? (
+            {delight?.quote ? <DailyQuoteCard quote={delight.quote} /> : null}
+            {suggestion ? (
+              <ProactiveCard suggestion={suggestion} onAccept={onAcceptSuggestion} onDismiss={onDismissSuggestion} onRemindLater={onRemindLaterSuggestion} />
+            ) : null}
+            {dashboardCards.length > 3 ? (
               <PressableScale onPress={() => setShowMoreInsights((value) => !value)} accessibilityRole="button" accessibilityLabel="Toggle more insights">
                 <GlassSurface intensity={18} radius={Radii.lg} style={styles.moreInsights}>
                   <AppText variant="caption" color="secondary">
-                    {showMoreInsights ? 'Hide extra cards' : `${hiddenCards.length} more insights`}
+                    {showMoreInsights ? 'Hide extra context' : 'See more'}
                   </AppText>
                 </GlassSurface>
               </PressableScale>
             ) : null}
-            {showMoreInsights ? hiddenCards.map((card, index) => (
+            {showMoreInsights ? dashboardCards.filter((card) => !rightCards.some((visible) => visible.id === card.id)).map((card, index) => (
               <InsightCard
                 key={card.id}
                 icon={card.icon}
@@ -795,14 +918,83 @@ function DesktopExperience({
                 onPress={card.route ? () => onNavigate(card.route as string) : undefined}
               />
             )) : null}
-            {suggestion ? (
-              <ProactiveCard suggestion={suggestion} onAccept={onAcceptSuggestion} onDismiss={onDismissSuggestion} />
-            ) : null}
           </ScrollView>
         </GlassSurface>
       </View>
     </View>
   );
+}
+
+function DesktopQuickAction({ card, delay, onPress }: { card: { label: string; icon: LucideIcon }; delay: number; onPress: () => void }) {
+  const theme = useTheme();
+  const Icon = card.icon;
+  return (
+    <Animated.View entering={FadeInUp.delay(delay).duration(340)}>
+      <PressableScale onPress={onPress} accessibilityRole="button" accessibilityLabel={card.label}>
+        <GlassSurface intensity={22} radius={Radii.pill} style={styles.desktopQuickAction}>
+          <Icon size={16} color={theme.colors.accent} strokeWidth={1.8} />
+          <AppText variant="footnote" color="secondary" numberOfLines={1}>
+            {card.label}
+          </AppText>
+        </GlassSurface>
+      </PressableScale>
+    </Animated.View>
+  );
+}
+
+function TypingIndicator() {
+  return (
+    <View style={styles.typingDots} accessibilityLabel="JISSI is thinking">
+      <View style={styles.typingDot} />
+      <View style={[styles.typingDot, styles.typingDotMid]} />
+      <View style={styles.typingDot} />
+    </View>
+  );
+}
+
+function DesktopPresenceMeta({
+  mode,
+  confidence,
+  lastHeardAt,
+  durationMs,
+}: {
+  mode: string;
+  confidence: number;
+  lastHeardAt: string | null;
+  durationMs: number;
+}) {
+  const confidenceLabel = confidence > 0 ? `${Math.round(confidence * 100)}%` : 'Ready';
+  return (
+    <GlassSurface intensity={16} radius={Radii.pill} style={styles.desktopPresenceMeta}>
+      <AppText variant="footnote" color="secondary" numberOfLines={1}>
+        {titleFromKey(mode)}
+      </AppText>
+      <View style={styles.presenceDivider} />
+      <AppText variant="footnote" color="muted" numberOfLines={1}>
+        Voice {confidenceLabel}
+      </AppText>
+      <View style={styles.presenceDivider} />
+      <AppText variant="footnote" color="muted" numberOfLines={1}>
+        {lastHeardAt ? `Heard ${relativeHeard(lastHeardAt)}` : formatDuration(durationMs)}
+      </AppText>
+    </GlassSurface>
+  );
+}
+
+function relativeHeard(value: string): string {
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return 'recently';
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  return `${Math.round(seconds / 60)}m ago`;
+}
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes ? `${minutes}m ${seconds}s` : `${seconds}s`;
 }
 
 function DesktopNavItem({
@@ -900,15 +1092,17 @@ function ProactiveCard({
   compact,
   onAccept,
   onDismiss,
+  onRemindLater,
 }: {
   suggestion: HomeSuggestion;
   compact?: boolean;
   onAccept: () => void;
   onDismiss: () => void;
+  onRemindLater: () => void;
 }) {
   return (
     <GlassSurface intensity={24} radius={Radii.lg} style={[styles.proactiveCard, compact && styles.proactiveCompact]}>
-      <PressableScale onPress={onAccept} accessibilityRole="button" accessibilityLabel={suggestion.message} style={styles.proactiveMain}>
+      <View style={styles.proactiveMain}>
         <AppText variant="bodyStrong" color="primary" numberOfLines={1}>
           {suggestion.title}
         </AppText>
@@ -918,40 +1112,60 @@ function ProactiveCard({
         <AppText variant="footnote" color="tertiary" numberOfLines={compact ? 1 : 2}>
           {suggestion.explanation}
         </AppText>
-      </PressableScale>
-      <PressableScale onPress={onDismiss} accessibilityRole="button" accessibilityLabel="Dismiss suggestion" style={styles.dismissButton}>
-        <AppText variant="footnote" color="muted">
-          Not now
-        </AppText>
-      </PressableScale>
+        <View style={styles.proactiveActions}>
+          <PressableScale onPress={onAccept} accessibilityRole="button" accessibilityLabel="Do now" style={styles.suggestionButtonPrimary}>
+            <AppText variant="footnote" color="accent">Do now</AppText>
+          </PressableScale>
+          <PressableScale onPress={onRemindLater} accessibilityRole="button" accessibilityLabel="Remind later" style={styles.suggestionButton}>
+            <AppText variant="footnote" color="secondary">Remind later</AppText>
+          </PressableScale>
+          <PressableScale onPress={onDismiss} accessibilityRole="button" accessibilityLabel="Dismiss suggestion" style={styles.suggestionButton}>
+            <AppText variant="footnote" color="muted">Dismiss</AppText>
+          </PressableScale>
+        </View>
+      </View>
     </GlassSurface>
   );
 }
 
 const styles = StyleSheet.create({
-  desktopRoot: { flex: 1, flexDirection: 'row', gap: Spacing.xl, paddingHorizontal: Spacing.xl, paddingVertical: Spacing.xl, overflow: 'hidden' },
+  desktopRoot: { flex: 1, flexDirection: 'row', gap: 24, paddingHorizontal: 24, paddingVertical: 24, overflow: 'hidden' },
   desktopVignette: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.18)' },
-  sidebarWrap: { width: 78 },
-  sidebarExpanded: { width: 188 },
-  sidebar: { flex: 1, alignItems: 'center', justifyContent: 'space-between', paddingVertical: Spacing.lg, paddingHorizontal: Spacing.sm },
-  sidebarBrand: { width: '100%', minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm },
+  sidebarWrap: { width: 72 },
+  sidebarExpanded: { width: 176 },
+  sidebar: { flex: 1, alignItems: 'center', justifyContent: 'space-between', paddingVertical: 24, paddingHorizontal: 8 },
+  sidebarBrand: { width: '100%', minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   brandMark: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
-  navList: { width: '100%', gap: Spacing.sm },
+  navList: { width: '100%', gap: 8 },
   navButton: { width: '100%' },
-  navInner: { minHeight: 46, borderRadius: Radii.lg, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, paddingHorizontal: Spacing.md },
+  navInner: { minHeight: 48, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12 },
+  desktopCenterScroll: { flex: 1, minWidth: 0 },
+  desktopCenterContent: { alignItems: 'center', paddingBottom: 56 },
+  desktopHero: { minHeight: 720, width: '100%', alignItems: 'center', justifyContent: 'center', gap: 24, paddingHorizontal: 24 },
+  heroCopy: { alignItems: 'center', gap: 8 },
   desktopCenter: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.lg, gap: Spacing.lg },
-  desktopHero: { alignItems: 'center', gap: Spacing.xs },
-  desktopGreeting: { fontFamily: Fonts.bodyBold, fontSize: 42, lineHeight: 50, letterSpacing: 0, textAlign: 'center' },
+  desktopGreeting: { fontFamily: Fonts.bodyBold, fontSize: 48, lineHeight: 56, letterSpacing: 0, textAlign: 'center' },
   desktopSubtitle: { fontFamily: Fonts.bodyMedium, fontSize: 18, lineHeight: 26, letterSpacing: 0, textAlign: 'center' },
-  desktopOrbStage: { width: 340, height: 300, alignItems: 'center', justifyContent: 'center' },
-  desktopCompanion: { maxWidth: 640, fontFamily: Fonts.bodyMedium, fontSize: 18, lineHeight: 27, letterSpacing: 0, textAlign: 'center' },
+  desktopOrbStage: { width: 360, height: 320, alignItems: 'center', justifyContent: 'center' },
+  desktopCompanion: { maxWidth: 560, fontFamily: Fonts.bodyMedium, fontSize: 17, lineHeight: 26, letterSpacing: 0, textAlign: 'center' },
+  typingDots: { height: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
+  typingDot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: 'rgba(255,255,255,0.56)' },
+  typingDotMid: { opacity: 0.8, transform: [{ translateY: -2 }] },
+  desktopPresenceMeta: { minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12 },
+  presenceDivider: { width: 1, height: 12, backgroundColor: 'rgba(255,255,255,0.12)' },
   desktopStatus: { textAlign: 'center', marginTop: -Spacing.md, marginBottom: Spacing.md },
   desktopTranscript: { maxWidth: 680, paddingHorizontal: Spacing.xl, marginBottom: Spacing.md },
   desktopTranscriptText: { fontFamily: Fonts.bodyMedium, fontSize: 22, lineHeight: 32, letterSpacing: 0, textAlign: 'center' },
   desktopConversation: { width: '100%', maxWidth: 760 },
+  heroCtas: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16, flexWrap: 'wrap' },
   primaryTalkWrap: { width: '100%', maxWidth: 360 },
-  primaryTalk: { minHeight: 78, flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingLeft: Spacing.sm, paddingRight: Spacing.xl },
+  primaryTalk: { minHeight: 78, flexDirection: 'row', alignItems: 'center', gap: 16, paddingLeft: 8, paddingRight: 24 },
   primaryTalkCopy: { flex: 1, gap: 2 },
+  secondaryCta: { minHeight: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, backgroundColor: 'rgba(255,255,255,0.045)' },
+  quickActionRow: { maxWidth: 760, flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+  desktopQuickAction: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 14 },
+  belowFold: { width: '100%', maxWidth: 880, flexDirection: 'row', flexWrap: 'wrap', gap: 16, paddingTop: 32 },
+  belowCardWrap: { flexGrow: 1, flexBasis: 260 },
   heroCardGrid: { width: '100%', maxWidth: 820, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: Spacing.md },
   heroCardWrap: { width: '47%', minWidth: 260 },
   desktopPromptRow: { width: '100%', maxWidth: 860, flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.xl },
@@ -959,11 +1173,11 @@ const styles = StyleSheet.create({
   desktopPrompt: { minHeight: 104, padding: Spacing.lg, justifyContent: 'space-between', gap: Spacing.md },
   desktopInput: { width: '100%', maxWidth: 720, minHeight: 82, flexDirection: 'row', alignItems: 'center', gap: Spacing.lg, paddingLeft: Spacing.xl, paddingRight: Spacing.sm, marginTop: Spacing.xl },
   desktopInputText: { flex: 1, gap: Spacing.xs },
-  rightPanel: { width: 340 },
-  rightPanelSurface: { flex: 1, padding: Spacing.lg },
-  rightPanelHeader: { gap: Spacing.xs, paddingBottom: Spacing.md },
-  rightPanelScroll: { gap: Spacing.md, paddingBottom: Spacing.lg },
-  insightCard: { minHeight: 70, flexDirection: 'row', alignItems: 'center', gap: Spacing.md, padding: Spacing.md },
+  rightPanel: { width: 328 },
+  rightPanelSurface: { flex: 1, padding: 16 },
+  rightPanelHeader: { gap: 4, paddingBottom: 16 },
+  rightPanelScroll: { gap: 12, paddingBottom: 16 },
+  insightCard: { minHeight: 82, flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14 },
   moreInsights: { minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.md },
   insightIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   insightText: { flex: 1, gap: Spacing.xs },
@@ -974,9 +1188,12 @@ const styles = StyleSheet.create({
   cardRow: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.huge, width: '100%' },
   cardWrap: { flex: 1 },
   card: { padding: Spacing.lg, minHeight: 130, justifyContent: 'space-between' },
-  proactiveCard: { width: '100%', maxWidth: 620, marginTop: Spacing.xl, padding: Spacing.md, flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  proactiveCard: { width: '100%', maxWidth: 620, marginTop: Spacing.xl, padding: Spacing.md, gap: Spacing.md },
   proactiveCompact: { maxWidth: '100%', marginTop: 0 },
   proactiveMain: { flex: 1, gap: Spacing.xs },
+  proactiveActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 8 },
+  suggestionButtonPrimary: { minHeight: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12, backgroundColor: 'rgba(93,220,255,0.12)' },
+  suggestionButton: { minHeight: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12, backgroundColor: 'rgba(255,255,255,0.05)' },
   dismissButton: { minHeight: 40, paddingHorizontal: Spacing.md, alignItems: 'center', justifyContent: 'center' },
   mobileSuggestion: { position: 'absolute', left: Spacing.gutter, right: Spacing.gutter, top: Spacing.xxl },
   cardIcon: {

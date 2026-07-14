@@ -4,6 +4,7 @@ import * as Speech from 'expo-speech';
 import { TTSState, TTSServiceConfig, TTSOptions, DEFAULT_TTS_CONFIG } from './types';
 import { sanitizeForSpeech } from './sanitizeForSpeech';
 import { PronunciationService } from '@/services/pronunciation';
+import { VoiceDiagnostics } from './VoiceDiagnostics';
 
 class TTSServiceImpl {
   private config: TTSServiceConfig = DEFAULT_TTS_CONFIG;
@@ -32,6 +33,7 @@ class TTSServiceImpl {
   private async prepareAudioForSpeech(): Promise<void> {
     if (Platform.OS === 'web') return;
     try {
+      VoiceDiagnostics.update({ audioFocus: 'speaking' });
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
@@ -57,6 +59,10 @@ class TTSServiceImpl {
 
   private setState(state: TTSState): void {
     this.currentState = state;
+    VoiceDiagnostics.update({
+      ttsState: state,
+      audioFocus: state === 'speaking' ? 'speaking' : state === 'idle' ? 'released' : VoiceDiagnostics.getSnapshot().audioFocus,
+    });
     this.stateListeners.forEach(cb => {
       try {
         cb(state);
@@ -290,12 +296,16 @@ class TTSServiceImpl {
   async stop(): Promise<void> {
     try {
       this.speakToken += 1;
+      const wasSpeaking = this.currentState === 'speaking';
       if (Platform.OS === 'web' && typeof window !== 'undefined' && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
       } else {
         await Speech.stop();
       }
       this.setState('idle');
+      if (wasSpeaking) {
+        VoiceDiagnostics.update({ runtimeState: 'interrupted', audioFocus: 'interrupted' });
+      }
       this.currentText = '';
     } catch (error) {
       // Silent fail on stop

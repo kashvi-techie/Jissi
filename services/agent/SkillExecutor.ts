@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DeviceStateEngine } from '@/services/device';
 import { SkillRegistry } from './SkillRegistry';
 import type { TaskExecutionPlan, TaskStep, TaskTimelineEvent } from './types';
 
@@ -43,12 +44,16 @@ async function setItem(key: string, value: string): Promise<void> {
 class SkillExecutorImpl {
   async execute(plan: TaskExecutionPlan, confirmed = false): Promise<TaskExecutionPlan> {
     const startedAt = plan.startedAt ?? timestamp();
+    const device = await DeviceStateEngine.getContext().catch(() => null);
     let nextPlan: TaskExecutionPlan = {
       ...plan,
       state: 'executing',
       startedAt,
       updatedAt: startedAt,
-      timeline: [...plan.timeline, timelineEvent('executing', 'Execution started.')],
+      timeline: [
+        ...plan.timeline,
+        timelineEvent('executing', device?.facts.length ? `Execution started. Device context: ${device.facts.join(' ')}` : 'Execution started.'),
+      ],
     };
 
     for (const step of nextPlan.steps) {

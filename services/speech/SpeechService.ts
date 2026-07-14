@@ -1,5 +1,6 @@
 import { Platform, AppState, AppStateStatus } from 'react-native';
 import { Audio } from 'expo-av';
+import { VoiceDiagnostics } from '@/services/voice/VoiceDiagnostics';
 import type {
   ExpoSpeechRecognitionResultEvent,
   ExpoSpeechRecognitionErrorEvent,
@@ -112,6 +113,7 @@ class SpeechServiceImpl {
     const now = Date.now();
     if (now - this.lastNativeRecoveryAt < SpeechServiceImpl.NATIVE_RECOVERY_COOLDOWN_MS) return;
     this.lastNativeRecoveryAt = now;
+    VoiceDiagnostics.incrementRecovery(message);
 
     try {
       // Android recognizers can get wedged after audio-focus churn between STT
@@ -130,6 +132,7 @@ class SpeechServiceImpl {
 
   private async prepareAudioForRecognition(): Promise<void> {
     try {
+      VoiceDiagnostics.update({ audioFocus: 'recording' });
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
@@ -144,6 +147,10 @@ class SpeechServiceImpl {
 
   async initialize(callbacks: SpeechRecognitionCallbacks): Promise<void> {
     this.callbacks = callbacks;
+    VoiceDiagnostics.update({
+      speechRecognizerState: this.nativeAvailable || Platform.OS === 'web' ? 'idle' : 'unsupported',
+      lifecycle: AppState.currentState,
+    });
     console.log('[STT][initialize] platform=', Platform.OS, 'nativeAvailable=', this.nativeAvailable, 'alreadyInitialized=', this.isInitialized);
 
     if (Platform.OS === 'web') {
@@ -181,6 +188,7 @@ class SpeechServiceImpl {
     this.webRecognition.onstart = () => {
       this.startInFlight = false;
       this.isListening = true;
+      VoiceDiagnostics.update({ microphoneState: 'listening', speechRecognizerState: 'listening', lastError: null });
       this.callbacks.onSpeechStart?.();
     };
 
@@ -188,6 +196,7 @@ class SpeechServiceImpl {
       this.startInFlight = false;
       this.stopInFlight = false;
       this.isListening = false;
+      VoiceDiagnostics.update({ microphoneState: 'idle', speechRecognizerState: 'idle', audioFocus: 'released' });
       this.callbacks.onSpeechEnd?.();
     };
 
@@ -216,6 +225,7 @@ class SpeechServiceImpl {
     this.webRecognition.onerror = (event: any) => {
       this.startInFlight = false;
       this.stopInFlight = false;
+      VoiceDiagnostics.update({ microphoneState: 'error', speechRecognizerState: 'error', lastError: event.error });
       this.callbacks.onSpeechError?.(event.error);
     };
   }
@@ -238,6 +248,7 @@ class SpeechServiceImpl {
       this.clearStartFallback();
       this.startInFlight = false;
       this.isListening = true;
+      VoiceDiagnostics.update({ microphoneState: 'listening', speechRecognizerState: 'listening', lastError: null });
       this.callbacks.onSpeechStart?.();
     });
     add<null>('end', () => {
@@ -246,6 +257,7 @@ class SpeechServiceImpl {
       this.stopInFlight = false;
       this.isListening = false;
       this.resolveStopWaiter();
+      VoiceDiagnostics.update({ microphoneState: 'idle', speechRecognizerState: 'idle', audioFocus: 'released' });
       this.callbacks.onSpeechEnd?.();
     });
     add<ExpoSpeechRecognitionResultEvent>('result', (ev) => {
@@ -266,6 +278,7 @@ class SpeechServiceImpl {
       this.isListening = false;
       this.resolveStopWaiter();
       const message = ev.message || ev.error || 'Unknown speech error';
+      VoiceDiagnostics.update({ microphoneState: 'error', speechRecognizerState: 'error', lastError: message });
       void this.recoverNativeRecognizer(message);
       this.callbacks.onSpeechError?.(message);
     });
@@ -282,7 +295,10 @@ class SpeechServiceImpl {
 
   private handleAppStateChange = (next: AppStateStatus): void => {
     if (next !== 'active' && (this.isListening || this.startInFlight || this.stopInFlight)) {
+      VoiceDiagnostics.update({ lifecycle: next, audioFocus: 'interrupted', microphoneState: 'stopping' });
       this.cancelListening();
+    } else {
+      VoiceDiagnostics.update({ lifecycle: next });
     }
   };
 
@@ -295,12 +311,17 @@ class SpeechServiceImpl {
     try {
       const current = await ExpoSpeechRecognition.getPermissionsAsync();
       console.log('[STT][permission] current=', current);
-      if (current.granted) return true;
+      if (current.granted) {
+        VoiceDiagnostics.update({ permissionState: 'granted' });
+        return true;
+      }
       const requested = await ExpoSpeechRecognition.requestPermissionsAsync();
       console.log('[STT][permission] requested=', requested);
+      VoiceDiagnostics.update({ permissionState: requested.granted ? 'granted' : 'denied' });
       return !!requested.granted;
     } catch (error) {
       console.log('[STT][permission] failed=', error instanceof Error ? error.message : String(error));
+      VoiceDiagnostics.update({ permissionState: 'unknown', lastError: error instanceof Error ? error.message : String(error) });
       return false;
     }
   }
@@ -327,6 +348,7 @@ class SpeechServiceImpl {
     }
 
     if (Platform.OS !== 'web' && AppState.currentState !== 'active') {
+      VoiceDiagnostics.update({ lastError: 'app-in-background: microphone can start only while the app is active.', lifecycle: AppState.currentState });
       this.callbacks.onSpeechError?.('app-in-background: microphone can start only while the app is active.');
       return;
     }
@@ -338,6 +360,7 @@ class SpeechServiceImpl {
     }
     this.startInFlight = true;
     this.isListening = true;
+    VoiceDiagnostics.update({ microphoneState: 'starting', speechRecognizerState: 'idle', lastError: null });
     const token = ++this.startToken;
 
     try {
@@ -358,6 +381,7 @@ class SpeechServiceImpl {
         if (!granted) {
           this.isListening = false;
           this.startInFlight = false;
+          VoiceDiagnostics.update({ microphoneState: 'error', speechRecognizerState: 'error', permissionState: 'denied', lastError: 'not-allowed: microphone or speech permission was denied.' });
           this.callbacks.onSpeechError?.('not-allowed: microphone or speech permission was denied.');
           return;
         }
@@ -367,6 +391,7 @@ class SpeechServiceImpl {
         if (!recognitionAvailable) {
           this.isListening = false;
           this.startInFlight = false;
+          VoiceDiagnostics.update({ microphoneState: 'error', speechRecognizerState: 'unsupported', lastError: 'Speech recognition is not available on this device.' });
           this.callbacks.onSpeechError?.('Speech recognition is not available on this device.');
           return;
         }
@@ -377,6 +402,7 @@ class SpeechServiceImpl {
         this.startFallbackTimer = setTimeout(() => {
           if (this.startToken === token && this.isListening && this.startInFlight) {
             this.startInFlight = false;
+            VoiceDiagnostics.update({ microphoneState: 'listening', speechRecognizerState: 'listening' });
             this.callbacks.onSpeechStart?.();
           }
         }, SpeechServiceImpl.NATIVE_START_ACK_TIMEOUT_MS);
@@ -385,6 +411,7 @@ class SpeechServiceImpl {
         // gracefully — never throw a runtime error.
         this.isListening = false;
         this.startInFlight = false;
+        VoiceDiagnostics.update({ microphoneState: 'error', speechRecognizerState: 'unsupported', lastError: 'Speech recognition is not available on this device.' });
         this.callbacks.onSpeechError?.('Speech recognition is not available on this device.');
         return;
       }
@@ -402,6 +429,7 @@ class SpeechServiceImpl {
   async stopListening(): Promise<void> {
     if ((!this.isListening && !this.startInFlight) || this.stopInFlight) return;
     this.stopInFlight = true;
+    VoiceDiagnostics.update({ microphoneState: 'stopping' });
 
     try {
       if (Platform.OS === 'web') {
@@ -428,12 +456,14 @@ class SpeechServiceImpl {
       this.isListening = false;
       this.startInFlight = false;
       this.stopInFlight = false;
+      VoiceDiagnostics.update({ microphoneState: 'idle', speechRecognizerState: 'idle', audioFocus: 'released' });
     } catch (error) {
       this.clearStartFallback();
       this.startInFlight = false;
       this.stopInFlight = false;
       this.resolveStopWaiter();
       const message = error instanceof Error ? error.message : 'Failed to stop listening';
+      VoiceDiagnostics.update({ microphoneState: 'error', speechRecognizerState: 'error', lastError: message });
       this.callbacks.onSpeechError?.(message);
     }
   }
@@ -450,6 +480,7 @@ class SpeechServiceImpl {
       this.startInFlight = false;
       this.stopInFlight = false;
       this.resolveStopWaiter();
+      VoiceDiagnostics.update({ microphoneState: 'idle', speechRecognizerState: 'idle', audioFocus: 'released' });
     } catch {
       // Silent fail on cancel
     }
@@ -479,6 +510,7 @@ class SpeechServiceImpl {
     this.stopInFlight = false;
     this.clearStartFallback();
     this.resolveStopWaiter();
+    VoiceDiagnostics.update({ microphoneState: 'idle', speechRecognizerState: 'idle', audioFocus: 'released' });
   }
 
   private removeSubscriptions(): void {

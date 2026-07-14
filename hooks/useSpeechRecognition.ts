@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Platform, Alert, Linking } from 'react-native';
 import { Audio } from 'expo-av';
 import { SpeechService } from '@/services/speech/SpeechService';
+import { VoiceDiagnostics } from '@/services/voice';
 import { SpeechState } from '@/services/speech/types';
 import { detectIntent, IntentResult } from '@/engine/intentEngine';
 
@@ -72,12 +73,14 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           stream.getTracks().forEach((track) => track.stop());
           if (mountedRef.current) setHasMicrophonePermission(true);
+          VoiceDiagnostics.update({ permissionState: 'granted' });
           console.log('[STT][hook:permission] web granted');
           return true;
         }
       } catch (error) {
         console.log('[STT][hook:permission] web denied=', error instanceof Error ? error.message : String(error));
         if (mountedRef.current) setError('Microphone permission denied. Please allow microphone access in your browser settings.');
+        VoiceDiagnostics.update({ permissionState: 'denied', lastError: 'Microphone permission denied. Please allow microphone access in your browser settings.' });
         return false;
       }
       return true;
@@ -88,11 +91,13 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
       console.log('[STT][hook:permission] expo-av status=', status, 'canAskAgain=', canAskAgain);
       if (status === 'granted') {
         if (mountedRef.current) setHasMicrophonePermission(true);
+        VoiceDiagnostics.update({ permissionState: 'granted' });
         return true;
       }
 
       if (!mountedRef.current) return false;
       setHasMicrophonePermission(false);
+      VoiceDiagnostics.update({ permissionState: canAskAgain ? 'denied' : 'blocked' });
       setError(canAskAgain ? 'Microphone permission is required for voice recognition.' : 'Microphone permission is blocked. Please enable it in Settings.');
       Alert.alert(
         'Microphone Permission Required',
@@ -108,6 +113,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
     } catch (error) {
       console.log('[STT][hook:permission] expo-av failed=', error instanceof Error ? error.message : String(error));
       if (mountedRef.current) setError('Failed to request microphone permission.');
+      VoiceDiagnostics.update({ permissionState: 'unknown', lastError: 'Failed to request microphone permission.' });
       return false;
     }
   }, []);
@@ -127,12 +133,14 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
         setState('listening');
         setIsListening(true);
         setError(null);
+        VoiceDiagnostics.update({ microphoneState: 'listening', speechRecognizerState: 'listening', lastError: null });
       },
       onSpeechEnd: () => {
         console.log('[STT][hook:event] onSpeechEnd');
         if (!mountedRef.current) return;
         setState('idle');
         setIsListening(false);
+        VoiceDiagnostics.update({ microphoneState: 'idle', speechRecognizerState: 'idle' });
       },
       onSpeechResults: (results: string[]) => {
         console.log('[STT][hook:event] onSpeechResults=', results);
@@ -168,6 +176,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
         }
         setState('error');
         setIsListening(false);
+        VoiceDiagnostics.update({ microphoneState: 'error', speechRecognizerState: 'error', lastError: message });
       },
     });
 
@@ -196,6 +205,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
       try {
         const { status } = await Audio.getPermissionsAsync();
         if (mountedRef.current) setHasMicrophonePermission(status === 'granted');
+        VoiceDiagnostics.update({ permissionState: status === 'granted' ? 'granted' : 'unknown' });
       } catch {
         if (mountedRef.current) setHasMicrophonePermission(false);
       }
@@ -209,9 +219,10 @@ export function useSpeechRecognition(): UseSpeechRecognitionResult {
     console.log('[STEP 5] isSupported', isSupported);
     console.log('[STT][hook:start] requestId=', requestId, 'isSupported=', isSupported);
     if (!isSupported) {
-      setError('Speech recognition is not supported on this device.');
-      setState('error');
-      return;
+        setError('Speech recognition is not supported on this device.');
+        setState('error');
+        VoiceDiagnostics.update({ runtimeState: 'offline', speechRecognizerState: 'unsupported', lastError: 'Speech recognition is not supported on this device.' });
+        return;
     }
 
     const granted = await requestMicrophonePermission();

@@ -94,6 +94,9 @@ export default function RootLayout() {
             <Stack.Screen name="task-planner-debug" options={{ headerShown: false }} />
             <Stack.Screen name="orchestrator-debug" options={{ headerShown: false }} />
             <Stack.Screen name="skills-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="capabilities-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="workflow-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="voice-debug" options={{ headerShown: false }} />
             <Stack.Screen name="context-debug" options={{ headerShown: false }} />
             <Stack.Screen name="emotion-debug" options={{ headerShown: false }} />
             <Stack.Screen name="explain-debug" options={{ headerShown: false }} />

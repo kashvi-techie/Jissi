@@ -3,14 +3,15 @@ import { Alert, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { BellRing, Download, History, Trash2 } from 'lucide-react-native';
 import { Screen, GlassSurface, AppText, PressableScale } from '@/components/ui';
-import { ProactiveExperience, ProactiveSnapshot, ProactiveSuggestion } from '@/services/proactive';
+import { ProactiveEngine, ProactiveEngineSnapshot, ProactiveMoment, ProactiveMomentStatus, ProactiveExperience } from '@/services/proactive';
 import { useTheme } from '@/theme';
 import { Radii, Spacing } from '@/theme/tokens';
 
-const EMPTY: ProactiveSnapshot = {
+const EMPTY: ProactiveEngineSnapshot = {
   suggestions: [],
+  candidates: [],
   history: [],
-  config: { threshold: 0.85, cooldownHours: 4 },
+  analytics: { shown: 0, dismissed: 0, accepted: 0, completed: 0 },
 };
 
 function percent(value: number): string {
@@ -23,11 +24,11 @@ function label(value: string): string {
 
 export default function ProactiveDebugScreen() {
   const theme = useTheme();
-  const [snapshot, setSnapshot] = useState<ProactiveSnapshot>(EMPTY);
+  const [snapshot, setSnapshot] = useState<ProactiveEngineSnapshot>(EMPTY);
   const [exportText, setExportText] = useState('');
 
   const load = useCallback(async () => {
-    setSnapshot(await ProactiveExperience.getSnapshot());
+    setSnapshot(await ProactiveEngine.getSnapshot());
   }, []);
 
   useFocusEffect(
@@ -37,12 +38,13 @@ export default function ProactiveDebugScreen() {
   );
 
   const clear = () => {
-    Alert.alert('Clear proactive data?', 'This removes local suggestion feedback and config from this device.', [
+    Alert.alert('Clear proactive data?', 'This removes local proactive feedback from this device.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Clear',
         style: 'destructive',
         onPress: async () => {
+          await ProactiveEngine.clearData();
           await ProactiveExperience.clearData();
           setExportText('');
           await load();
@@ -51,8 +53,8 @@ export default function ProactiveDebugScreen() {
     ]);
   };
 
-  const feedback = async (suggestion: ProactiveSuggestion, kind: 'accepted' | 'rejected' | 'ignored') => {
-    await ProactiveExperience.recordFeedback(suggestion, kind);
+  const feedback = async (moment: ProactiveMoment, status: ProactiveMomentStatus) => {
+    await ProactiveEngine.record(moment, status);
     await load();
   };
 
@@ -68,54 +70,38 @@ export default function ProactiveDebugScreen() {
               Proactive Debug
             </AppText>
             <AppText variant="body" color="muted">
-              Local suggestions, confidence, source engine, cooldown and feedback history.
+              Local proactive moments, priority, confidence, reasons, engine sources and feedback analytics.
             </AppText>
           </View>
         </View>
 
         <View style={styles.actions}>
-          <DebugButton label="Export JSON" icon={Download} onPress={async () => setExportText(await ProactiveExperience.exportJson())} />
+          <DebugButton label="Export JSON" icon={Download} onPress={async () => setExportText(await ProactiveEngine.exportJson())} />
           <DebugButton label="Clear data" icon={Trash2} destructive onPress={clear} />
         </View>
 
-        <Section title="Config">
+        <Section title="Analytics">
           <GlassSurface intensity={24} radius={Radii.lg} style={styles.card}>
-            <Line label="Threshold" value={percent(snapshot.config.threshold)} />
-            <Line label="Cooldown" value={`${snapshot.config.cooldownHours} hours`} />
+            <Line label="Shown" value={String(snapshot.analytics.shown)} />
+            <Line label="Dismissed" value={String(snapshot.analytics.dismissed)} />
+            <Line label="Accepted" value={String(snapshot.analytics.accepted)} />
+            <Line label="Completed" value={String(snapshot.analytics.completed)} />
             <Line label="Blocked" value={snapshot.blockedReason ?? 'No'} />
           </GlassSurface>
         </Section>
 
-        <Section title="Generated suggestions" count={snapshot.suggestions.length}>
-          {snapshot.suggestions.map((suggestion) => (
-            <GlassSurface key={suggestion.id} intensity={26} radius={Radii.lg} style={styles.card}>
-              <View style={styles.rowTop}>
-                <View style={styles.flex}>
-                  <AppText variant="bodyStrong" color="primary">
-                    {suggestion.title}
-                  </AppText>
-                  <AppText variant="caption" color="muted" style={styles.capitalize}>
-                    {suggestion.source} · priority {suggestion.priority}
-                  </AppText>
-                </View>
-                <AppText variant="bodyStrong" color="accent">
-                  {percent(suggestion.confidence)}
-                </AppText>
-              </View>
-              <AppText variant="caption" color="secondary">
-                {suggestion.message}
-              </AppText>
-              <AppText variant="footnote" color="muted">
-                {suggestion.reason}
-              </AppText>
-              <View style={styles.feedbackRow}>
-                <MiniButton label="Accept" onPress={() => feedback(suggestion, 'accepted')} />
-                <MiniButton label="Reject" onPress={() => feedback(suggestion, 'rejected')} />
-                <MiniButton label="Ignore" onPress={() => feedback(suggestion, 'ignored')} />
-              </View>
-            </GlassSurface>
+        <Section title="Active suggestions" count={snapshot.suggestions.length}>
+          {snapshot.suggestions.map((moment) => (
+            <MomentCard key={moment.id} moment={moment} onFeedback={feedback} />
           ))}
-          {!snapshot.suggestions.length ? <Empty text="No suggestion passed the threshold right now." /> : null}
+          {!snapshot.suggestions.length ? <Empty text="No proactive moment passed threshold right now." /> : null}
+        </Section>
+
+        <Section title="All candidates" count={snapshot.candidates.length}>
+          {snapshot.candidates.map((moment) => (
+            <MomentCard key={moment.id} moment={moment} onFeedback={feedback} compact />
+          ))}
+          {!snapshot.candidates.length ? <Empty text="No candidates generated from local engines yet." /> : null}
         </Section>
 
         <Section title="History" count={snapshot.history.length}>
@@ -124,10 +110,10 @@ export default function ProactiveDebugScreen() {
               <History size={15} color={theme.colors.textMuted} strokeWidth={1.6} />
               <View style={styles.flex}>
                 <AppText variant="caption" color="primary" style={styles.capitalize}>
-                  {label(entry.feedback)} · {entry.source}
+                  {label(entry.status)}
                 </AppText>
                 <AppText variant="footnote" color="muted">
-                  {new Date(entry.timestamp).toLocaleString()} · {percent(entry.confidenceBefore)} → {percent(entry.confidenceAfter)}
+                  {new Date(entry.timestamp).toLocaleString()} · {percent(entry.confidenceBefore)} to {percent(entry.confidenceAfter)}
                 </AppText>
               </View>
             </GlassSurface>
@@ -150,8 +136,57 @@ export default function ProactiveDebugScreen() {
   );
 }
 
+function MomentCard({
+  moment,
+  compact,
+  onFeedback,
+}: {
+  moment: ProactiveMoment;
+  compact?: boolean;
+  onFeedback: (moment: ProactiveMoment, status: ProactiveMomentStatus) => void;
+}) {
+  return (
+    <GlassSurface intensity={26} radius={Radii.lg} style={styles.card}>
+      <View style={styles.rowTop}>
+        <View style={styles.flex}>
+          <AppText variant="bodyStrong" color="primary">
+            {moment.title}
+          </AppText>
+          <AppText variant="caption" color="muted" style={styles.capitalize}>
+            {moment.source} · priority {moment.priority} · {moment.engines.join(', ')}
+          </AppText>
+        </View>
+        <AppText variant="bodyStrong" color="accent">
+          {percent(moment.confidence)}
+        </AppText>
+      </View>
+      <AppText variant="caption" color="secondary" numberOfLines={compact ? 2 : undefined}>
+        {moment.message}
+      </AppText>
+      <AppText variant="footnote" color="muted">
+        Reason: {moment.reason}
+      </AppText>
+      <AppText variant="footnote" color="muted">
+        Context: {moment.context}
+      </AppText>
+      <AppText variant="footnote" color="tertiary">
+        Expires: {new Date(moment.expiry).toLocaleString()}
+      </AppText>
+      {!compact ? (
+        <View style={styles.feedbackRow}>
+          <MiniButton label="Shown" onPress={() => onFeedback(moment, 'shown')} />
+          <MiniButton label="Do now" onPress={() => onFeedback(moment, 'accepted')} />
+          <MiniButton label="Remind later" onPress={() => onFeedback(moment, 'remind_later')} />
+          <MiniButton label="Dismiss" onPress={() => onFeedback(moment, 'dismissed')} />
+          <MiniButton label="Completed" onPress={() => onFeedback(moment, 'completed')} />
+        </View>
+      ) : null}
+    </GlassSurface>
+  );
+}
+
 function DebugButton({
-  label,
+  label: buttonLabel,
   icon: Icon,
   destructive,
   onPress,
@@ -163,11 +198,11 @@ function DebugButton({
 }) {
   const theme = useTheme();
   return (
-    <PressableScale onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={styles.actionButton}>
+    <PressableScale onPress={onPress} accessibilityRole="button" accessibilityLabel={buttonLabel} style={styles.actionButton}>
       <GlassSurface intensity={30} radius={Radii.lg} style={styles.actionSurface}>
         <Icon size={17} color={destructive ? theme.colors.error : theme.colors.accent} strokeWidth={1.8} />
         <AppText variant="caption" color={destructive ? theme.colors.error : 'accent'}>
-          {label}
+          {buttonLabel}
         </AppText>
       </GlassSurface>
     </PressableScale>
@@ -239,7 +274,7 @@ const styles = StyleSheet.create({
   rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.md },
   flex: { flex: 1 },
   capitalize: { textTransform: 'capitalize' },
-  feedbackRow: { flexDirection: 'row', gap: Spacing.sm, paddingTop: Spacing.sm },
+  feedbackRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, paddingTop: Spacing.sm },
   miniButton: { minHeight: 34, paddingHorizontal: Spacing.md, alignItems: 'center', justifyContent: 'center', borderRadius: Radii.md, backgroundColor: 'rgba(255,255,255,0.05)' },
   historyRow: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: Spacing.md, padding: Spacing.md },
   line: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.md },

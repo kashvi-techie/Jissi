@@ -6,6 +6,7 @@ import Animated, {
   cancelAnimation,
   Easing,
   interpolate,
+  SharedValue,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
@@ -163,7 +164,11 @@ export function VoiceButton({ state, onPress, size = 96 }: VoiceButtonProps) {
               <WifiOff size={size * 0.3} color={theme.colors.textOnAccent} strokeWidth={2} />
             ) : state === 'error' ? (
               <AlertTriangle size={size * 0.3} color={theme.colors.textOnAccent} strokeWidth={2} />
-            ) : state === 'listening' || state === 'speaking' || state === 'thinking' || state === 'tool_execution' ? (
+            ) : state === 'listening' ? (
+              <VoiceGlyph kind="waveform" size={size} progress={ripple1} />
+            ) : state === 'speaking' ? (
+              <VoiceGlyph kind="equalizer" size={size} progress={pulse} />
+            ) : state === 'thinking' || state === 'tool_execution' ? (
               <Square size={size * 0.26} color={theme.colors.textOnAccent} fill={theme.colors.textOnAccent} strokeWidth={2} />
             ) : (
               <Mic size={size * 0.32} color={theme.colors.textOnAccent} strokeWidth={2} />
@@ -175,9 +180,36 @@ export function VoiceButton({ state, onPress, size = 96 }: VoiceButtonProps) {
   );
 }
 
+function VoiceGlyph({ kind, size, progress }: { kind: 'waveform' | 'equalizer'; size: number; progress: SharedValue<number> }) {
+  return (
+    <View style={styles.voiceGlyph}>
+      {[0, 1, 2, 3, 4].map((bar) => (
+        <VoiceBar key={bar} bar={bar} kind={kind} size={size} progress={progress} />
+      ))}
+    </View>
+  );
+}
+
+function VoiceBar({ bar, kind, size, progress }: { bar: number; kind: 'waveform' | 'equalizer'; size: number; progress: SharedValue<number> }) {
+  const style = useAnimatedStyle(() => {
+    const phase = (progress.value + bar * 0.13) % 1;
+    const lift = Math.sin(phase * Math.PI);
+    const base = kind === 'waveform' ? 0.26 : 0.32;
+    const range = kind === 'waveform' ? 0.28 : 0.42;
+    return {
+      height: size * (base + range * Math.max(0.18, lift)),
+      opacity: kind === 'waveform' ? 0.82 : 0.92,
+      transform: [{ translateY: kind === 'waveform' ? Math.cos(phase * Math.PI) * 2 : 0 }],
+    };
+  });
+  return <Animated.View style={[styles.voiceBar, { width: Math.max(3, size * 0.045), borderRadius: size * 0.03 }, style]} />;
+}
+
 const styles = StyleSheet.create({
   field: { alignItems: 'center', justifyContent: 'center' },
   ripple: { position: 'absolute', borderWidth: 2 },
   thinkRing: { position: 'absolute', borderWidth: 2, borderColor: 'transparent', borderBottomColor: 'transparent', borderLeftColor: 'transparent' },
   core: { alignItems: 'center', justifyContent: 'center' },
+  voiceGlyph: { height: '48%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
+  voiceBar: { backgroundColor: 'rgba(255,255,255,0.92)' },
 });

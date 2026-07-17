@@ -4,7 +4,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import {
   BookOpen,
-  Brain,
   CalendarCheck2,
   GitBranch,
   Home,
@@ -16,7 +15,6 @@ import {
   Sparkles,
   Target,
   Trophy,
-  User,
   Users,
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
@@ -46,8 +44,7 @@ import { TalkView } from '@/components/TalkView';
 import { DailyBriefCard } from '@/components/daily/DailyBriefCard';
 import { VoiceOverlay } from '@/components/VoiceOverlay';
 import { AppText, GlassSurface, PressableScale, Screen, VoiceButton, VoiceButtonState } from '@/components/ui';
-import { ConversationTimeline } from '@/components/ConversationTimeline';
-import { AchievementToast, DailyQuoteCard } from '@/components/delight/DelightSurfaces';
+import { AchievementToast } from '@/components/delight/DelightSurfaces';
 import { AmbientPresence, LivingAvatar } from '@/components/presence/PresenceEngine';
 import { useTheme } from '@/theme';
 import { Fonts } from '@/theme/typography';
@@ -211,7 +208,7 @@ function relationshipSpotlight(relationships: RelationshipProfile[], fallbackCou
         ? `${titleFromKey(person.relationship)} in your circle. You talked about them today.`
         : `You have not talked about ${person.name} since ${day.toLowerCase()}.`,
       icon: Users,
-      route: '/relationship-debug',
+      route: '/(tabs)/profile',
     };
   }
   return {
@@ -220,7 +217,7 @@ function relationshipSpotlight(relationships: RelationshipProfile[], fallbackCou
     title: fallbackCount ? `${fallbackCount} people noticed` : 'Your people will appear here',
     body: fallbackCount ? 'JISSI has relationship context ready for future greetings.' : 'Introduce a teacher, friend or mentor and JISSI will remember the relationship locally.',
     icon: Users,
-    route: '/relationship-debug',
+    route: '/(tabs)/profile',
   };
 }
 
@@ -337,14 +334,14 @@ export default function HomeScreen() {
         title: activeGoal.title,
         body: currentTask ? currentTask.title : `${activeGoal.progress.completionPercent}% complete. Continue the next small step.`,
         icon: Target,
-        route: '/planner-debug',
+        route: '/timeline',
       } : routine ? {
         id: 'today-focus',
         label: "Today's Focus",
         title: routine.label,
         body: routine.reason,
         icon: Repeat,
-        route: '/behavior-debug',
+        route: '/timeline',
       } : suggestion ? {
         id: 'today-focus',
         label: "Today's Focus",
@@ -364,7 +361,7 @@ export default function HomeScreen() {
         title: activeGoal ? `Continue ${activeGoal.title}` : profile?.goal ? `Continue ${profile.goal}` : 'Choose your first journey',
         body: activeGoal ? `${activeGoal.progress.completedTasks}/${activeGoal.progress.totalTasks} tasks completed` : 'A single goal is enough for JISSI to begin building momentum.',
         icon: CalendarCheck2,
-        route: '/planner-debug',
+        route: '/timeline',
       };
       const relationshipCard = relationshipSpotlight(relationships, context?.relationships.length ?? 0);
       const achievementCard: DashboardCard = {
@@ -389,7 +386,7 @@ export default function HomeScreen() {
         title: emotionLabel(emotion?.state),
         body: emotionCopy(emotion?.state),
         icon: Sparkles,
-        route: '/emotion-debug',
+        route: '/(tabs)/profile',
       };
       const quickThought = routine
         ? `You usually ${routine.label.toLowerCase()} around this time.`
@@ -500,7 +497,7 @@ export default function HomeScreen() {
     if (suggestion.action.type === 'prompt') {
       openTopic(suggestion.action.prompt);
     } else if (suggestion.action.type === 'open_debug') {
-      router.push(suggestion.action.route as never);
+      openTopic(suggestion.message);
     }
   };
 
@@ -601,11 +598,11 @@ export default function HomeScreen() {
           onDailyBriefAction={openTopic}
           emotionState={presenceEmotion}
           lifeAction={lifeAction}
-          onPlanner={() => router.push('/planner-debug' as never)}
+          onPlanner={() => router.push('/timeline' as never)}
           onTimeline={() => router.push('/timeline' as never)}
           onLifeGraph={() => router.push('/(tabs)/life-graph' as never)}
           onMemory={() => router.push('/(tabs)/profile' as never)}
-          onRelationships={() => router.push('/relationship-debug' as never)}
+          onRelationships={() => router.push('/(tabs)/profile' as never)}
           onSettings={() => router.push('/(tabs)/settings' as never)}
         />
       )}
@@ -695,9 +692,7 @@ function DesktopExperience({
   onNavigate: (route: string) => void;
 }) {
   const theme = useTheme();
-  const [expanded, setExpanded] = useState(false);
-  const [showMoreInsights, setShowMoreInsights] = useState(false);
-  const [phraseIndex, setPhraseIndex] = useState(0);
+  const [expanded, setExpanded] = useState(false);  const [phraseIndex, setPhraseIndex] = useState(0);
   const isActive = orbState === 'listening' || orbState === 'speaking' || orbState === 'tool_execution';
   const isThinking = phase === 'thinking' || phase === 'processing' || phase === 'tool_execution';
   const dashboardCards = useMemo(() => dashboard.cards, [dashboard.cards]);
@@ -706,15 +701,12 @@ function DesktopExperience({
   const continueCard = findCard('continue');
   const memoryCard = findCard('recent-memory');
   const thoughtCard = findCard('thought');
-  const rightCards = useMemo(() => [focusCard, continueCard, thoughtCard].filter((card): card is DashboardCard => !!card), [focusCard, continueCard, thoughtCard]);
-  const belowFoldCards = useMemo(() => [continueCard, focusCard, memoryCard].filter((card): card is DashboardCard => !!card), [continueCard, focusCard, memoryCard]);
-  const recentAssistant = [...messages].reverse().find((message) => message.role === 'assistant')?.content;
+  const belowFoldCards = useMemo(() => [focusCard, continueCard].filter((card): card is DashboardCard => !!card), [continueCard, focusCard]);
   const navItems: { label: string; icon: LucideIcon; route?: string; onPress?: () => void }[] = [
     { label: 'Home', icon: Home },
-    { label: 'Planner', icon: CalendarCheck2, route: '/planner-debug' },
+    { label: 'Chat', icon: MessageCircle, route: '/(tabs)/history' },
     { label: 'Timeline', icon: BookOpen, route: '/timeline' },
     { label: 'Life Graph', icon: GitBranch, route: '/(tabs)/life-graph' },
-    { label: 'People', icon: Users, route: '/relationship-debug' },
     { label: 'Settings', icon: Settings, route: '/(tabs)/settings' },
   ];
   const quickActions: { label: string; prompt: string; icon: LucideIcon }[] = [
@@ -830,23 +822,22 @@ function DesktopExperience({
                 </View>
               </GlassSurface>
             </PressableScale>
-            <PressableScale onPress={() => onPrompt('I want to type instead')} accessibilityRole="button" accessibilityLabel="Type instead" style={styles.secondaryCta}>
+            <PressableScale onPress={() => onNavigate('/(tabs)/history')} accessibilityRole="button" accessibilityLabel="Open Chat" style={styles.secondaryCta}>
               <AppText variant="bodyStrong" color="secondary">
-                Type instead
+                Open Chat
               </AppText>
             </PressableScale>
           </View>
 
           <View style={styles.quickActionRow}>
-            {quickActions.map((action, index) => (
-              <DesktopQuickAction key={action.label} card={action} delay={220 + index * 35} onPress={() => onPrompt(action.prompt)} />
-            ))}
+            <DesktopQuickAction card={{ label: 'Continue', icon: Repeat }} delay={220} onPress={() => onNavigate('/timeline')} />
+            <DesktopQuickAction card={{ label: 'Chat', icon: MessageCircle }} delay={260} onPress={() => onNavigate('/(tabs)/history')} />
+            <DesktopQuickAction card={{ label: 'Settings', icon: Settings }} delay={300} onPress={() => onNavigate('/(tabs)/settings')} />
           </View>
-
-          {dailyBrief ? <DailyBriefCard brief={dailyBrief} onAction={onDailyBriefAction} /> : null}
         </View>
 
         <View style={styles.belowFold}>
+          {dailyBrief ? <DailyBriefCard brief={dailyBrief} compact onAction={onDailyBriefAction} /> : null}
           {belowFoldCards.map((card, index) => (
             <View key={card.id} style={styles.belowCardWrap}>
               <InsightCard
@@ -859,68 +850,8 @@ function DesktopExperience({
               />
             </View>
           ))}
-          <View style={styles.belowCardWrap}>
-            <InsightCard
-              icon={MessageSquare}
-              label="Conversation"
-              title={recentAssistant ? 'Latest reply' : 'No conversation yet'}
-              value={recentAssistant ?? 'Start with one thought and JISSI will keep the thread warm.'}
-              delay={280}
-              onPress={() => onNavigate('/(tabs)/history')}
-            />
-          </View>
         </View>
       </ScrollView>
-
-      <View style={styles.rightPanel}>
-        <GlassSurface intensity={32} radius={Radii.xxl} style={styles.rightPanelSurface}>
-          <View style={styles.rightPanelHeader}>
-            <AppText variant="title" color="primary">
-              Companion
-            </AppText>
-            <AppText variant="caption" color="muted">
-              Quiet context, only what matters.
-            </AppText>
-          </View>
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.rightPanelScroll}>
-            {rightCards.map((card, index) => (
-              <InsightCard
-                key={card.id}
-                icon={card.icon}
-                label={card.label}
-                title={card.title}
-                value={card.body}
-                delay={80 + index * 40}
-                onPress={card.route ? () => onNavigate(card.route as string) : undefined}
-              />
-            ))}
-            {delight?.quote ? <DailyQuoteCard quote={delight.quote} /> : null}
-            {suggestion ? (
-              <ProactiveCard suggestion={suggestion} onAccept={onAcceptSuggestion} onDismiss={onDismissSuggestion} onRemindLater={onRemindLaterSuggestion} />
-            ) : null}
-            {dashboardCards.length > 3 ? (
-              <PressableScale onPress={() => setShowMoreInsights((value) => !value)} accessibilityRole="button" accessibilityLabel="Toggle more insights">
-                <GlassSurface intensity={18} radius={Radii.lg} style={styles.moreInsights}>
-                  <AppText variant="caption" color="secondary">
-                    {showMoreInsights ? 'Hide extra context' : 'See more'}
-                  </AppText>
-                </GlassSurface>
-              </PressableScale>
-            ) : null}
-            {showMoreInsights ? dashboardCards.filter((card) => !rightCards.some((visible) => visible.id === card.id)).map((card, index) => (
-              <InsightCard
-                key={card.id}
-                icon={card.icon}
-                label={card.label}
-                title={card.title}
-                value={card.body}
-                delay={260 + index * 40}
-                onPress={card.route ? () => onNavigate(card.route as string) : undefined}
-              />
-            )) : null}
-          </ScrollView>
-        </GlassSurface>
-      </View>
     </View>
   );
 }

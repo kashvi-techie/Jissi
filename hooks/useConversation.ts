@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { AIService, AIMessage, AIGenerationResult } from '@/services/ai';
-import { ConversationRepository, Conversation, NaturalConversationEngine } from '@/services/conversation';
+import { ConversationRepository, Conversation, NaturalConversationEngine, ConversationStateMachine, HumanConversationEngine } from '@/services/conversation';
 import { TTSService, TTSState } from '@/services/voice';
 import { ActionService, ActionResult } from '@/services/actions';
 import { SocialGreetingService } from '@/services/social';
@@ -32,6 +32,20 @@ export interface UseConversationResult {
 }
 
 /** Intents that map to a device action rather than an AI answer. */
+const AI_RESPONSE_TIMEOUT_MS = 30000;
+
+async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('AI response timed out.')), ms);
+  });
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 const ACTION_INTENTS: IntentType[] = [
   'open_youtube',
   'open_chrome',
@@ -41,6 +55,11 @@ const ACTION_INTENTS: IntentType[] = [
 
 function isActionIntent(intent: IntentType): boolean {
   return ACTION_INTENTS.includes(intent);
+}
+
+async function humanizeResponse(userInput: string, response: string): Promise<string> {
+  const result = await HumanConversationEngine.process({ userInput, response });
+  return result.responseAfter;
 }
 
 /**
@@ -72,6 +91,8 @@ export function useConversation(): UseConversationResult {
   // Single-flight lock: prevents a second overlapping request (and thus a
   // duplicate AI/action call) while one is already being processed.
   const isProcessingRef = useRef(false);
+  const queuedInputRef = useRef<{ input: string; intent?: IntentResult | null } | null>(null);
+  const interruptRequestedRef = useRef(false);
 
   // Bridge the external TTSService state machine into React.
   useEffect(() => {
@@ -135,9 +156,14 @@ export function useConversation(): UseConversationResult {
       // With the hand-off's transcript de-dupe (index.tsx prevTranscriptRef) this
       // guarantees exactly one AI/action request per user utterance.
       if (isProcessingRef.current) {
+        interruptRequestedRef.current = true;
+        queuedInputRef.current = { input, intent };
+        ConversationStateMachine.interrupt(input);
         return;
       }
       isProcessingRef.current = true;
+      interruptRequestedRef.current = false;
+      ConversationStateMachine.startTask(input, 'Conversation');
 
       // try/finally guarantees the lock is released on EVERY exit path: the
       // action-branch early return, the not-initialized return, normal
@@ -155,20 +181,22 @@ export function useConversation(): UseConversationResult {
       // Functional update + the load-time copy guarantee no duplication here.
       setMessages((prev) => [...prev, userMessage]);
       await ContextEngine.observe({ input, intent });
+      ConversationStateMachine.transition('Understanding', 'Observed user input and context.');
 
       const smallTalk = await NaturalConversationEngine.detectSmallTalk(input);
       if (smallTalk) {
         setState('thinking');
         try {
+          const replyText = await humanizeResponse(input, smallTalk.reply);
           const assistantMessage = await ConversationRepository.addMessage({
             conversationId: currentConversation?.id || '',
             role: 'assistant',
-            content: smallTalk.reply,
+            content: replyText,
           });
           setMessages((prev) => [...prev, assistantMessage]);
-          setLastResponse(smallTalk.reply);
-          await ContextEngine.rememberAssistantResponse(smallTalk.reply);
-          await TTSService.speak(smallTalk.reply);
+          setLastResponse(replyText);
+          await ContextEngine.rememberAssistantResponse(replyText);
+          await TTSService.speak(replyText);
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Small talk failed');
         } finally {
@@ -181,7 +209,7 @@ export function useConversation(): UseConversationResult {
       if (relationshipResult) {
         setState('thinking');
         try {
-          const replyText = PersonalityService.warmShortReply(relationshipResult.reply);
+          const replyText = await humanizeResponse(input, PersonalityService.warmShortReply(relationshipResult.reply));
           const assistantMessage = await ConversationRepository.addMessage({
             conversationId: currentConversation?.id || '',
             role: 'assistant',
@@ -199,14 +227,16 @@ export function useConversation(): UseConversationResult {
         return;
       }
 
+      ConversationStateMachine.setEngine('DecisionEngine');
       const decision = await DecisionEngine.decide({ input, intent });
 
       if (pendingAgentConfirmationRef.current && /^(yes|yeah|yep|confirm|do it|go ahead|sure|haan|ha)$/i.test(input.trim())) {
         setState('thinking');
         try {
+          ConversationStateMachine.transition('Executing', 'Confirming pending Android agent action.');
           const agentResult = await AgentRouter.confirm(pendingAgentConfirmationRef.current);
           pendingAgentConfirmationRef.current = null;
-          const replyText = PersonalityService.warmShortReply(agentResult.message);
+          const replyText = await humanizeResponse(input, PersonalityService.warmShortReply(agentResult.message));
           const assistantMessage = await ConversationRepository.addMessage({
             conversationId: currentConversation?.id || '',
             role: 'assistant',
@@ -229,7 +259,7 @@ export function useConversation(): UseConversationResult {
         pendingAgentConfirmationRef.current = null;
         setState('thinking');
         try {
-          const replyText = PersonalityService.warmShortReply("Okay, I won't do that.");
+          const replyText = await humanizeResponse(input, PersonalityService.warmShortReply("Okay, I won't do that."));
           const assistantMessage = await ConversationRepository.addMessage({
             conversationId: currentConversation?.id || '',
             role: 'assistant',
@@ -248,12 +278,12 @@ export function useConversation(): UseConversationResult {
       if (decision.action === 'relationship_response' && intent?.intent === 'social_greeting') {
         setState('thinking');
         try {
-          const replyText = SocialGreetingService.generate({
+          const replyText = await humanizeResponse(input, SocialGreetingService.generate({
             relationship: intent.entities?.relationship,
             name: intent.entities?.name,
             gender: intent.entities?.gender,
             rawText: input,
-          });
+          }));
 
           if (intent.entities?.name) {
             await RelationshipService.upsertPerson({
@@ -280,6 +310,7 @@ export function useConversation(): UseConversationResult {
       }
 
       // ── Branch 1: device action ──────────────────────────────────────────
+      ConversationStateMachine.setEngine('AgentRouter');
       const agentResult = await AgentRouter.route({ input, decision });
       if (agentResult.handled) {
         setState('thinking');
@@ -287,7 +318,7 @@ export function useConversation(): UseConversationResult {
           if (agentResult.record.state === 'asking_confirmation') {
             pendingAgentConfirmationRef.current = agentResult.record.id;
           }
-          const replyText = PersonalityService.warmShortReply(agentResult.message);
+          const replyText = await humanizeResponse(input, PersonalityService.warmShortReply(agentResult.message));
           const assistantMessage = await ConversationRepository.addMessage({
             conversationId: currentConversation?.id || '',
             role: 'assistant',
@@ -311,7 +342,7 @@ export function useConversation(): UseConversationResult {
       if (plannerResult) {
         setState('thinking');
         try {
-          const replyText = PersonalityService.warmShortReply(plannerResult.reply);
+          const replyText = await humanizeResponse(input, PersonalityService.warmShortReply(plannerResult.reply));
           const assistantMessage = await ConversationRepository.addMessage({
             conversationId: currentConversation?.id || '',
             role: 'assistant',
@@ -339,7 +370,7 @@ export function useConversation(): UseConversationResult {
             result.status === 'success'
               ? result.message
               : `I couldn't complete that action. ${result.error || result.message}`;
-          const replyText = PersonalityService.warmShortReply(baseReplyText);
+          const replyText = await humanizeResponse(input, PersonalityService.warmShortReply(baseReplyText));
 
           const assistantMessage = await ConversationRepository.addMessage({
             conversationId: currentConversation?.id || '',
@@ -367,6 +398,8 @@ export function useConversation(): UseConversationResult {
       }
 
       setState('thinking');
+      ConversationStateMachine.setEngine('AIService');
+      ConversationStateMachine.transition('Thinking', 'Generating assistant response.');
       try {
         const filler = await NaturalConversationEngine.thinkingFiller(input);
         if (filler) {
@@ -379,20 +412,37 @@ export function useConversation(): UseConversationResult {
           setLastResponse(filler);
         }
         const contextualPrompt = await ContextEngine.buildPromptContext(input);
-        const result: AIGenerationResult = await AIService.generate(contextualPrompt);
+        const generateOnce = () => withTimeout(AIService.generate(contextualPrompt), AI_RESPONSE_TIMEOUT_MS);
+        let result: AIGenerationResult;
+        try {
+          result = await generateOnce();
+        } catch (timeoutError) {
+          ConversationStateMachine.markRetry(timeoutError instanceof Error ? timeoutError.message : 'AI response timed out.');
+          result = await generateOnce();
+        }
+        if (interruptRequestedRef.current) {
+          ConversationStateMachine.transition('Interrupted', 'Discarded stale response after a newer user request.');
+          return;
+        }
+        ConversationStateMachine.markFirstResponse();
+        const responseText = await humanizeResponse(input, result.text);
 
         const assistantMessage = await ConversationRepository.addMessage({
           conversationId: currentConversation?.id || '',
           role: 'assistant',
-          content: result.text,
+          content: responseText,
         });
         setMessages((prev) => [...prev, assistantMessage]);
-        setLastResponse(result.text);
-        await ContextEngine.rememberAssistantResponse(result.text);
+        setLastResponse(responseText);
+        ConversationStateMachine.markFinalResponse();
+        await ContextEngine.rememberAssistantResponse(responseText);
 
-        await TTSService.speak(result.text);
+        ConversationStateMachine.transition('Speaking', 'Speaking assistant response.');
+        await TTSService.speak(responseText);
+        ConversationStateMachine.transition('Completed', 'Assistant response completed.');
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to process your request';
+        ConversationStateMachine.transition(message.toLowerCase().includes('timed out') ? 'Timeout' : 'Failed', message);
         setError(message);
 
         const assistantMessage = await ConversationRepository.addMessage({
@@ -406,6 +456,11 @@ export function useConversation(): UseConversationResult {
       }
       } finally {
         isProcessingRef.current = false;
+        const queued = queuedInputRef.current;
+        queuedInputRef.current = null;
+        if (queued) {
+          void processInput(queued.input, queued.intent);
+        }
       }
     },
     [currentConversation]

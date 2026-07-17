@@ -21,12 +21,18 @@ export function PressableScale({
   style,
   onPressIn,
   onPressOut,
+  onHoverIn,
+  onHoverOut,
   ...rest
 }: PressableScaleProps) {
   const pressed = useSharedValue(0);
+  const hovered = useSharedValue(0);
 
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: withSpring(1 - pressed.value * (1 - scaleTo), Springs.press) }],
+    transform: [
+      { translateY: withSpring(-hovered.value * 2, Springs.press) },
+      { scale: withSpring((1 - pressed.value * (1 - scaleTo)) * (1 + hovered.value * 0.012), Springs.press) },
+    ],
   }));
 
   const handleIn = (e: GestureResponderEvent) => {
@@ -37,10 +43,18 @@ export function PressableScale({
     pressed.value = 0;
     onPressOut?.(e);
   };
+  const handleHoverIn = (e: any) => {
+    hovered.value = 1;
+    onHoverIn?.(e);
+  };
+  const handleHoverOut = (e: any) => {
+    hovered.value = 0;
+    onHoverOut?.(e);
+  };
 
   return (
     <Animated.View style={animatedStyle}>
-      <Pressable {...rest} onPressIn={handleIn} onPressOut={handleOut} style={style}>
+      <Pressable {...rest} onHoverIn={handleHoverIn} onHoverOut={handleHoverOut} onPressIn={handleIn} onPressOut={handleOut} style={style}>
         {children}
       </Pressable>
     </Animated.View>

@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
-import { Clock, MessageCircle, Search } from 'lucide-react-native';
+import { MessageCircle, Search } from 'lucide-react-native';
 import { useFocusEffect } from 'expo-router';
 import { Screen, GlassSurface, AppText } from '@/components/ui';
 import { GlassSkeleton, PremiumEmptyState } from '@/components/delight/DelightSurfaces';
@@ -86,14 +86,14 @@ export default function HistoryScreen() {
       <ScrollView contentContainerStyle={[styles.content, isWide && styles.contentWide]} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <GlassSurface intensity={36} radius={Radii.circle} style={styles.badge}>
-            <Clock size={30} color={theme.colors.textSecondary} strokeWidth={1.5} />
+            <MessageCircle size={30} color={theme.colors.accent} strokeWidth={1.5} />
           </GlassSurface>
           <View style={styles.headerText}>
-            <AppText variant="headline" color="primary">
-              History
+            <AppText style={styles.title} color="primary">
+              Chat
             </AppText>
-            <AppText variant="body" color="muted">
-              Conversations grouped by recency.
+            <AppText style={styles.subtitle} color="muted">
+              A quiet place for every conversation with JISSI.
             </AppText>
           </View>
         </View>
@@ -103,7 +103,7 @@ export default function HistoryScreen() {
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Search conversations"
+            placeholder="Search chats"
             placeholderTextColor={theme.colors.textMuted}
             style={[styles.input, { color: theme.colors.textPrimary }]}
           />
@@ -118,7 +118,7 @@ export default function HistoryScreen() {
         ) : filtered.length === 0 ? (
           <PremiumEmptyState
             icon={MessageCircle}
-            title={query.trim() ? 'No conversations found.' : 'No conversations yet. Let\'s create something memorable.'}
+            title={query.trim() ? 'No chats found.' : 'No chats yet. Let\'s create something memorable.'}
             description={query.trim() ? 'Try a softer search term or start a fresh conversation with JISSI.' : 'Your meaningful chats will appear here with calm date grouping and quick search.'}
           />
         ) : (
@@ -160,16 +160,18 @@ export default function HistoryScreen() {
 }
 
 const styles = StyleSheet.create({
-  content: { paddingHorizontal: Spacing.gutter, paddingTop: Spacing.xxxl, paddingBottom: 120, gap: Spacing.lg },
-  contentWide: { maxWidth: 820, alignSelf: 'center', width: '100%' },
-  header: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  content: { paddingHorizontal: Spacing.gutter, paddingTop: 56, paddingBottom: 120, gap: 28 },
+  contentWide: { maxWidth: 880, alignSelf: 'center', width: '100%' },
+  header: { flexDirection: 'row', alignItems: 'center', gap: Spacing.lg },
   headerText: { flex: 1, gap: Spacing.xs },
-  badge: { width: 72, height: 72, alignItems: 'center', justifyContent: 'center' },
-  searchBox: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingHorizontal: Spacing.lg, height: 52 },
+  badge: { width: 76, height: 76, alignItems: 'center', justifyContent: 'center' },
+  title: { fontFamily: 'Exo2_700Bold', fontSize: 44, lineHeight: 50, letterSpacing: 0 },
+  subtitle: { fontFamily: 'Inter_400Regular', fontSize: 16, lineHeight: 24, letterSpacing: 0 },
+  searchBox: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingHorizontal: Spacing.lg, height: 56 },
   input: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 16, height: 48, padding: 0 },
   group: { gap: Spacing.md },
   list: { gap: Spacing.md },
-  card: { padding: Spacing.lg, gap: Spacing.sm },
+  card: { padding: Spacing.xl, gap: Spacing.sm },
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   cardTitle: { flex: 1 },
 });

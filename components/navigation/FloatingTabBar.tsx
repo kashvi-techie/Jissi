@@ -2,7 +2,7 @@ import React from 'react';
 import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Clock, GitBranch, User } from 'lucide-react-native';
+import { GitBranch, MessageCircle, User } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { PressableScale } from '@/components/ui';
 import { useTheme } from '@/theme';
@@ -49,7 +49,7 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
         tint={theme.glass.blurTint}
         style={[styles.bar, { borderColor: theme.colors.hairline, backgroundColor: theme.glass.fill }]}
       >
-        {side('history', Clock, 'History')}
+        {side('history', MessageCircle, 'Chat')}
         {side('life-graph', GitBranch, 'Life Graph')}
 
         <PressableScale onPress={() => go('index')} accessibilityRole="button" accessibilityLabel="Home" style={styles.centerWrap}>

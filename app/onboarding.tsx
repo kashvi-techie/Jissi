@@ -104,14 +104,14 @@ export default function OnboardingScreen() {
                   Meet JISSI.
                 </AppText>
                 <AppText style={styles.heroSubtitle} color="muted">
-                  Your AI that grows with you.
+                  Your personal AI companion for goals, memory, and momentum.
                 </AppText>
               </View>
             ) : null}
 
             {step === 1 ? (
               <View style={styles.stack}>
-                <StepHeader title="JISSI learns quietly." subtitle="Built to feel helpful without feeling invasive." />
+                <StepHeader title="A calmer kind of intelligence." subtitle="JISSI learns patterns, protects your privacy, and keeps the experience beautifully simple." />
                 <View style={styles.cardGrid}>
                   {[
                     'Learns your routines',
@@ -136,7 +136,7 @@ export default function OnboardingScreen() {
 
             {step === 2 ? (
               <View style={styles.stack}>
-                <StepHeader title="What should I call you?" subtitle="This stays local and helps JISSI feel personal." />
+                <StepHeader title="What should I call you?" subtitle="A small detail that makes every conversation feel like it belongs to you." />
                 <GlassSurface intensity={28} radius={Radii.xl} style={styles.formCard}>
                   <LabeledInput label="Name" value={name} onChangeText={setName} placeholder="Kashvi" autoCapitalize="words" />
                   <LabeledInput label="Nickname optional" value={nickname} onChangeText={setNickname} placeholder="Kash" autoCapitalize="words" />
@@ -146,7 +146,7 @@ export default function OnboardingScreen() {
 
             {step === 3 ? (
               <View style={styles.stack}>
-                <StepHeader title="Which describes you best?" subtitle="Choose one or more, then add what you care about." />
+                <StepHeader title="Which describes you best?" subtitle="JISSI uses this to shape your first suggestions, not to box you in." />
                 <ChipGroup items={ROLES} selected={roles} onToggle={toggleRole} />
                 <View style={styles.divider} />
                 <AppText variant="caption" color="muted">
@@ -158,7 +158,7 @@ export default function OnboardingScreen() {
 
             {step === 4 ? (
               <View style={styles.stack}>
-                <StepHeader title="What's one goal you're working toward?" subtitle="JISSI will turn this into a local starter plan." />
+                <StepHeader title="What's one goal you're working toward?" subtitle="One honest goal is enough. JISSI will help you keep returning to it." />
                 <GlassSurface intensity={28} radius={Radii.xl} style={styles.formCard}>
                   <LabeledInput label="Current goal" value={goal} onChangeText={setGoal} placeholder="Learn React" />
                   <View style={styles.examples}>
@@ -172,7 +172,7 @@ export default function OnboardingScreen() {
 
             {step === 5 ? (
               <View style={styles.stack}>
-                <StepHeader title="Choose JISSI's personality." subtitle="You can change this later as JISSI grows with you." />
+                <StepHeader title="Choose JISSI's personality." subtitle="Choose the tone that feels easiest to live with every day." />
                 <ChipGroup items={PERSONALITIES} selected={[personality]} onToggle={(item) => setPersonality(item as OnboardingPersonality)} single />
               </View>
             ) : null}
@@ -185,10 +185,10 @@ export default function OnboardingScreen() {
                     Hi {displayName}.
                   </AppText>
                   <AppText style={styles.finalCopy} color="secondary">
-                    I'm excited to learn alongside you. Your memory, goals, routines and preferences start here, privately on this device.
+                    I’ll learn your pace, remember what matters, and keep everything personal to this device.
                   </AppText>
                   <AppText style={styles.finalCopy} color="accent">
-                    Let's build something amazing.
+                    Ready when you are.
                   </AppText>
                 </GlassSurface>
               </View>
@@ -318,7 +318,7 @@ const styles = StyleSheet.create({
   progressFill: { height: '100%', borderRadius: 999 },
   content: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: Spacing.gutter, paddingVertical: Spacing.xl },
   contentWide: { alignItems: 'center' },
-  step: { width: '100%', minHeight: 440, justifyContent: 'center' },
+  step: { width: '100%', minHeight: 480, justifyContent: 'center' },
   stepWide: { maxWidth: 760 },
   centered: { alignItems: 'center', justifyContent: 'center', gap: Spacing.xl },
   orbWrap: { width: 300, height: 300, alignItems: 'center', justifyContent: 'center' },
@@ -329,7 +329,7 @@ const styles = StyleSheet.create({
   title: { fontFamily: Fonts.bodyBold, fontSize: 34, lineHeight: 42, letterSpacing: 0 },
   subtitle: { fontFamily: Fonts.bodyMedium, fontSize: 17, lineHeight: 25, letterSpacing: 0 },
   cardGrid: { gap: Spacing.md },
-  featureCard: { minHeight: 78, padding: Spacing.lg, flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  featureCard: { minHeight: 84, padding: Spacing.lg, flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   check: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   formCard: { padding: Spacing.lg, gap: Spacing.lg },
   inputGroup: { gap: Spacing.sm },

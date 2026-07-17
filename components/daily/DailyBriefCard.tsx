@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { CalendarCheck2, CheckCircle2, Heart, Sparkles, Target, Trophy, Users } from 'lucide-react-native';
+import { Heart, Sparkles, Target, Trophy, Users } from 'lucide-react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { AppText, GlassSurface, PressableScale } from '@/components/ui';
 import type { DailyBrief } from '@/services/daily';
@@ -18,7 +18,6 @@ export function DailyBriefCard({
   onAction?: (prompt: string) => void;
 }) {
   const theme = useTheme();
-  const taskPreview = brief.plannerTasks.slice(0, compact ? 1 : 2);
   return (
     <Animated.View entering={FadeInUp.duration(520)} style={compact ? styles.compactWrap : styles.wrap}>
       <GlassSurface intensity={30} radius={Radii.xxl} strong style={[styles.card, compact && styles.compactCard]}>
@@ -50,10 +49,8 @@ export function DailyBriefCard({
 
         <View style={styles.lines}>
           <BriefLine icon={Heart} label={brief.moodSummary.label} value={brief.moodSummary.value} />
-          <BriefLine icon={CalendarCheck2} label="Tasks" value={taskPreview.map((task) => task.value).join('  •  ')} />
-          <BriefLine icon={Users} label={brief.relationshipReminder.label} value={brief.relationshipReminder.value} />
           <BriefLine icon={Trophy} label={brief.habitStreak.label} value={brief.habitStreak.value} />
-          {!compact ? <BriefLine icon={CheckCircle2} label={brief.recentAchievement.label} value={brief.recentAchievement.value} /> : null}
+          {!compact ? <BriefLine icon={Users} label={brief.relationshipReminder.label} value={brief.relationshipReminder.value} /> : null}
         </View>
 
         <View style={styles.thought}>
@@ -100,12 +97,12 @@ function BriefLine({ icon: Icon, label, value }: { icon: typeof Sparkles; label:
 const styles = StyleSheet.create({
   wrap: { width: '100%', maxWidth: 760 },
   compactWrap: { width: '100%' },
-  card: { padding: 22, gap: 18, overflow: 'hidden' },
-  compactCard: { padding: Spacing.lg, gap: 14 },
+  card: { padding: 26, gap: 20, overflow: 'hidden' },
+  compactCard: { padding: Spacing.xl, gap: 16 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   mark: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   headerText: { flex: 1, gap: 4 },
-  greeting: { fontFamily: Fonts.bodyBold, fontSize: 24, lineHeight: 30, letterSpacing: 0 },
+  greeting: { fontFamily: Fonts.bodyBold, fontSize: 28, lineHeight: 34, letterSpacing: 0 },
   priority: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 2 },
   priorityText: { flex: 1, gap: 3 },
   lines: { gap: 10 },

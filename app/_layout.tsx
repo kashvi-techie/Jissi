@@ -24,7 +24,6 @@ import { ThemeProvider } from '@/theme';
 // until EXPO_PUBLIC_TOOLS_ENABLED=true). No runtime effect while the flag is off.
 import '@/services/tools/register';
 
-console.log('__JISSI_DEBUG_OK__');
 
 SplashScreen.preventAutoHideAsync().catch((error) => {
   console.warn('[JISSI] Splash preventAutoHide failed', error);
@@ -88,26 +87,13 @@ export default function RootLayout() {
         <AssistantProvider>
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="behavior-debug" options={{ headerShown: false }} />
-            <Stack.Screen name="action-debug" options={{ headerShown: false }} />
-            <Stack.Screen name="agent-debug" options={{ headerShown: false }} />
-            <Stack.Screen name="task-planner-debug" options={{ headerShown: false }} />
-            <Stack.Screen name="orchestrator-debug" options={{ headerShown: false }} />
-            <Stack.Screen name="skills-debug" options={{ headerShown: false }} />
-            <Stack.Screen name="capabilities-debug" options={{ headerShown: false }} />
-            <Stack.Screen name="workflow-debug" options={{ headerShown: false }} />
-            <Stack.Screen name="voice-debug" options={{ headerShown: false }} />
-            <Stack.Screen name="context-debug" options={{ headerShown: false }} />
-            <Stack.Screen name="emotion-debug" options={{ headerShown: false }} />
-            <Stack.Screen name="explain-debug" options={{ headerShown: false }} />
-            <Stack.Screen name="planner-debug" options={{ headerShown: false }} />
-            <Stack.Screen name="proactive-debug" options={{ headerShown: false }} />
-            <Stack.Screen name="relationship-debug" options={{ headerShown: false }} />
             <Stack.Screen name="onboarding" options={{ headerShown: false }} />
             <Stack.Screen name="timeline" options={{ headerShown: false }} />
-            <Stack.Screen name="life-debug" options={{ headerShown: false }} />
-            <Stack.Screen name="decision-debug" options={{ headerShown: false }} />
-            <Stack.Screen name="memory-consolidation-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="conversation-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="conversation-stream-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="human-conversation-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="notifications-debug" options={{ headerShown: false }} />
+            <Stack.Screen name="orchestrator-debug" options={{ headerShown: false }} />
             <Stack.Screen name="+not-found" />
           </Stack>
           <StatusBar style="light" />

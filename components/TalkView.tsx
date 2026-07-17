@@ -1,13 +1,14 @@
 import React, { memo, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BookOpen, CalendarCheck2, GitBranch, MessageCircle, MessageSquare, Settings, Sparkles, Users } from 'lucide-react-native';
+import { BookOpen, CalendarCheck2, GitBranch, MessageCircle, Settings, Sparkles, Users } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import Animated, { FadeInUp, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { OrbEngine } from '@/components/orb/OrbEngine';
 import { OrbState } from '@/components/orb/PlasmaOrb';
 import { VoiceWave } from '@/components/VoiceWave';
 import { DailyBriefCard } from '@/components/daily/DailyBriefCard';
+import { ConversationTimeline } from '@/components/ConversationTimeline';
 import { AIMessage } from '@/services/ai';
 import type { DailyBrief } from '@/services/daily';
 import type { EmotionState } from '@/services/emotion';
@@ -59,13 +60,6 @@ interface TalkDashboardCard {
   icon?: LucideIcon;
 }
 
-const quickActions: { label: string; prompt: string; icon: LucideIcon }[] = [
-  { label: 'Continue yesterday', prompt: 'Continue where we stopped yesterday', icon: MessageCircle },
-  { label: 'Plan my day', prompt: 'Help me plan my day', icon: CalendarCheck2 },
-  { label: 'Remember something', prompt: 'Remember something important', icon: BookOpen },
-  { label: 'Reflect', prompt: 'Help me reflect on today', icon: Sparkles },
-];
-
 const thinkingPhrases = [
   'Thinking...',
   'Let me figure that out...',
@@ -113,15 +107,16 @@ export const TalkView = memo(function TalkView({
   const ringPulse = useSharedValue(0);
   const mouthPulse = useSharedValue(0);
   const [phraseIndex, setPhraseIndex] = useState(0);
-  const visibleCards = useMemo(() => dashboardCards.slice(0, 3), [dashboardCards]);
-  const recentMessages = useMemo(() => messages.slice(-6), [messages]);
+  const visibleCards = useMemo(() => dashboardCards.slice(0, 1), [dashboardCards]);
   const presenceText = isThinking
-    ? thinkingPhrases[phraseIndex]
+    ? phraseIndex % 2 === 0 ? 'Give me a second...' : thinkingPhrases[phraseIndex]
     : isListening
-      ? transcript || "I'm listening."
+      ? transcript || "I'm here."
       : isSpeaking
         ? 'Speaking... tap Talk to interrupt.'
-        : status;
+        : messages.length > 0
+          ? 'Done.'
+          : status;
 
   useEffect(() => {
     orbPulse.value = withRepeat(withTiming(1, { duration: isSpeaking ? 1050 : isListening ? 1800 : 4600 }), -1, true);
@@ -140,10 +135,7 @@ export const TalkView = memo(function TalkView({
     return () => clearInterval(timer);
   }, [isThinking]);
 
-  const handleMicPress = () => {
-    console.log('[STEP 1] Mic pressed');
-    onMic();
-  };
+  const handleMicPress = () => onMic();
 
   const orbScale = useAnimatedStyle(() => ({
     transform: [{ scale: 1 + orbPulse.value * (isSpeaking ? 0.045 : isListening ? 0.026 : 0.016) }],
@@ -205,15 +197,23 @@ export const TalkView = memo(function TalkView({
             lastHeardAt={lastHeardAt}
             durationMs={conversationDurationMs}
           />
+          <View style={styles.conversationPreview}>
+            {messages.length === 0 && !isThinking ? (
+              <GlassSurface intensity={16} radius={Radii.xl} style={styles.emptyConversation}>
+                <AppText variant="bodyStrong" color="primary" style={styles.emptyTitle}>
+                  What would you like to do today?
+                </AppText>
+                <AppText variant="caption" color="muted" style={styles.emptyCopy}>
+                  Talk, plan, remember something, or just think out loud with JISSI.
+                </AppText>
+              </GlassSurface>
+            ) : (
+              <ConversationTimeline messages={messages} thinking={isThinking} />
+            )}
+          </View>
         </Animated.View>
 
         {dailyBrief ? <DailyBriefCard brief={dailyBrief} compact onAction={onDailyBriefAction} /> : null}
-
-        <Animated.View entering={FadeInUp.delay(180).duration(420)} style={styles.quickActions}>
-          {quickActions.map((action, index) => (
-            <QuickAction key={action.label} action={action} delay={index * 40} onPress={onMessage} />
-          ))}
-        </Animated.View>
 
         <View style={styles.sections}>
           {visibleCards.map((card, index) => (
@@ -221,32 +221,10 @@ export const TalkView = memo(function TalkView({
           ))}
         </View>
 
-        <GlassSurface intensity={18} radius={Radii.xl} style={styles.chatPanel}>
-          <View style={styles.chatHeader}>
-            <AppText variant="title" color="primary">
-              Conversation
-            </AppText>
-            <PressableScale onPress={onMessage} accessibilityRole="button" accessibilityLabel="Open conversation">
-              <MessageSquare size={18} color={theme.colors.textSecondary} strokeWidth={1.8} />
-            </PressableScale>
-          </View>
-          {recentMessages.length ? (
-            recentMessages.map((message) => <ChatBubble key={message.id} message={message} />)
-          ) : (
-            <AppText variant="body" color="muted">
-              Start with one thought. I will keep it simple.
-            </AppText>
-          )}
-          {transcript ? (
-            <ChatBubble message={{ id: 'live-transcript', role: 'user', content: transcript }} />
-          ) : null}
-        </GlassSurface>
-
         <View style={styles.pageLinks}>
-          <PageLink label="Planner" icon={CalendarCheck2} onPress={onPlanner} />
-          <PageLink label="Timeline" icon={BookOpen} onPress={onTimeline} />
+          <PageLink label="Chat" icon={MessageCircle} onPress={onMessage} />
+          <PageLink label="Journey" icon={CalendarCheck2} onPress={onTimeline ?? onPlanner} />
           <PageLink label="Life Graph" icon={GitBranch} onPress={onLifeGraph} />
-          <PageLink label="People" icon={Users} onPress={onRelationships} />
           <PageLink label="Settings" icon={Settings} onPress={onSettings ?? onMemory} />
         </View>
       </ScrollView>
@@ -269,23 +247,6 @@ export const TalkView = memo(function TalkView({
     </View>
   );
 });
-
-function QuickAction({ action, onPress, delay }: { action: { label: string; icon: LucideIcon }; onPress?: () => void; delay: number }) {
-  const theme = useTheme();
-  const Icon = action.icon;
-  return (
-    <Animated.View entering={FadeInUp.delay(delay).duration(320)} style={styles.quickActionWrap}>
-      <PressableScale onPress={onPress} accessibilityRole="button" accessibilityLabel={action.label}>
-        <GlassSurface intensity={22} radius={Radii.pill} style={styles.quickAction}>
-          <Icon size={15} color={theme.colors.accent} strokeWidth={1.8} />
-          <AppText variant="footnote" color="secondary" numberOfLines={1}>
-            {action.label}
-          </AppText>
-        </GlassSurface>
-      </PressableScale>
-    </Animated.View>
-  );
-}
 
 function TypingIndicator() {
   return (
@@ -371,19 +332,6 @@ function SectionCard({ card, delay }: { card: TalkDashboardCard; delay: number }
   );
 }
 
-function ChatBubble({ message }: { message: Pick<AIMessage, 'id' | 'role' | 'content'> }) {
-  const isUser = message.role === 'user';
-  return (
-    <Animated.View entering={FadeInUp.duration(280)} style={[styles.bubbleRow, isUser && styles.bubbleRowUser]}>
-      <GlassSurface intensity={isUser ? 26 : 18} radius={Radii.xl} style={[styles.bubble, isUser && styles.userBubble]}>
-        <AppText variant="caption" color="primary">
-          {message.content}
-        </AppText>
-      </GlassSurface>
-    </Animated.View>
-  );
-}
-
 function PageLink({ label, icon: Icon, onPress }: { label: string; icon: LucideIcon; onPress?: () => void }) {
   const theme = useTheme();
   return (
@@ -400,8 +348,8 @@ const styles = StyleSheet.create({
   root: { flex: 1, overflow: 'hidden' },
   noise: { ...StyleSheet.absoluteFillObject, opacity: 0.12, backgroundColor: 'rgba(255,255,255,0.012)' },
   vignette: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.2)' },
-  scrollContent: { paddingTop: 48, paddingHorizontal: 24, paddingBottom: 132, gap: 24 },
-  hero: { minHeight: 620, alignItems: 'center', justifyContent: 'center', gap: 16 },
+  scrollContent: { paddingTop: 64, paddingHorizontal: 24, paddingBottom: 148, gap: 36 },
+  hero: { minHeight: 640, alignItems: 'center', justifyContent: 'center', gap: 20 },
   greeting: { fontFamily: Fonts.bodyBold, fontSize: 34, lineHeight: 42, letterSpacing: 0, textAlign: 'center' },
   subtitle: { fontFamily: Fonts.bodyMedium, fontSize: 16, lineHeight: 24, letterSpacing: 0, textAlign: 'center' },
   orbStage: { minHeight: 320, alignItems: 'center', justifyContent: 'center' },
@@ -435,19 +383,14 @@ const styles = StyleSheet.create({
   typingDotMid: { opacity: 0.8, transform: [{ translateY: -2 }] },
   presenceBar: { minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12 },
   presenceDivider: { width: 1, height: 12, backgroundColor: 'rgba(255,255,255,0.12)' },
-  quickActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  quickActionWrap: { flexGrow: 1, minWidth: '46%' },
-  quickAction: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 14 },
+  conversationPreview: { width: '100%', maxWidth: 560, minHeight: 18 },
+  emptyConversation: { minHeight: 92, alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 22, paddingVertical: 18 },
+  emptyTitle: { textAlign: 'center' },
+  emptyCopy: { textAlign: 'center', maxWidth: 360 },
   sections: { gap: 12 },
-  sectionCard: { minHeight: 104, flexDirection: 'row', alignItems: 'center', gap: 16, padding: 16 },
+  sectionCard: { minHeight: 96, flexDirection: 'row', alignItems: 'center', gap: 16, padding: 16 },
   sectionIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   sectionText: { flex: 1, gap: 4 },
-  chatPanel: { gap: 12, padding: 16 },
-  chatHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  bubbleRow: { flexDirection: 'row', justifyContent: 'flex-start' },
-  bubbleRowUser: { justifyContent: 'flex-end' },
-  bubble: { maxWidth: '86%', paddingVertical: 10, paddingHorizontal: 14 },
-  userBubble: { backgroundColor: 'rgba(93,220,255,0.10)' },
   pageLinks: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   pageLink: { minHeight: 44, flexGrow: 1, minWidth: '46%', borderRadius: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,0.035)' },
   fixedTalk: { position: 'absolute', left: 20, right: 20, bottom: 24 },
